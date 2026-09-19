@@ -2621,7 +2621,8 @@
             // 1.0.72: מאפיין פרמטרי רגל (אופציונלי — קושחה ישנה לא תכיל אותו)
             try { charLegParams = await service.getCharacteristic(charUuidLegParams); }
             catch (e) { charLegParams = null; console.warn('legParams char missing (fw<1.0.72)'); }
-            showAndPopulateLegParams_();  // 1.0.72: הצג מקטע פרמטרי רגל אם הקושחה תומכת
+            // הערה: אין לקרוא legParams כאן — קריאת GATT במקביל לשאר ה-discovery מפילה את החיבור.
+            // המקטע מוצג מ-applyNmptMode_ אחרי שהחיבור הושלם.
 
             // Get OTA Service and Characteristics (now using lowercase UUID constants)
             otaService = await server.getPrimaryService(otaServiceUuid);
@@ -3155,12 +3156,16 @@
         if (!sec) return;
         if (!charLegParams) { sec.style.display = 'none'; return; }  // 1.0.72: מוצג לכל צמיד שתומך
         try {
-            var dv = new DataView((await charLegParams.readValue()).buffer);
-            if (dv.byteLength >= 5) {
-                document.getElementById('lp_power').value = dv.getUint8(0);
-                document.getElementById('lp_interval').value = dv.getUint16(1, true);
-                document.getElementById('lp_duration').value = dv.getUint16(3, true);
-                if (dv.byteLength >= 7) document.getElementById('lp_delay').value = dv.getUint16(5, true);
+            var _lpv = null;
+            await runGattOp(async function () { _lpv = await charLegParams.readValue(); });  // מנעול — לא במקביל לפעולות GATT אחרות
+            if (_lpv) {
+                var dv = new DataView(_lpv.buffer);
+                if (dv.byteLength >= 5) {
+                    document.getElementById('lp_power').value = dv.getUint8(0);
+                    document.getElementById('lp_interval').value = dv.getUint16(1, true);
+                    document.getElementById('lp_duration').value = dv.getUint16(3, true);
+                    if (dv.byteLength >= 7) document.getElementById('lp_delay').value = dv.getUint16(5, true);
+                }
             }
         } catch (e) { console.warn('read legParams failed', e); }
         sec.style.display = 'block';
