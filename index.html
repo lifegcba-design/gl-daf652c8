@@ -3129,7 +3129,7 @@
         var panel = document.getElementById('nmptDualPanel');
         var delayInput = document.getElementById('nmptLegDelayInput');
         if (delayInput) delayInput.value = nmptLegDelaySec;
-        // לקוח: לא נוגע בחיבורי רגל/צימוד — פאנל זוגי מוסתר; הרגל מופעלת אוטומטית דרך היד (ESP-NOW / כפתור 3)
+        // לקוח (1.0.71): יד-בלבד — לא נוגע בחיבורי רגל/צימוד. הרגל מקבלת פרמטרים+START מהיד ב-ESP-NOW.
         if (panel) panel.classList.remove('is-visible');
         var banner = document.getElementById('nmptDualBanner');
         if (banner) {
