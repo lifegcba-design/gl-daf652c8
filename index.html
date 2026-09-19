@@ -1,0 +1,3907 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <script>window.__GL_EXPECTED_LOG_PARSER_BUILD = "2026-05-20-us6";</script>
+    <script>/* gl-log-parser inlined */
+        /**
+         * Golden Life — מפענח לוגים מצמיד (נטען בנפרד כדי לעקוף מטמון דפדפן ב-HTML).
+         * BUILD חייב להתאים ל-?v= בקישור בדף.
+         */
+        (function (root) {
+            var BUILD = "2026-05-20-us6";
+            var SERIES_FAULT_STOPS = {
+                MANUAL_STOP: true,
+                OTA_START: true,
+                OTA_SUCCESS: true,
+                OTA_FAIL: true,
+                LOW_BATTERY: true,
+                ERROR: true,
+                WATCHDOG: true
+            };
+            var _syncWallTimeMs = 0;
+            var _deviceMillisAtSync = null;
+            var _wallUsBase = null;
+            var MAX_JS_DATE_MS_ = 8640000000000000 - 1;
+
+            var VALID_LOG_EVENT_TYPES = {
+                SESSION_START: true,
+                SESSION_END: true,
+                SESSION_SUMMARY: true,
+                SERIES_SUMMARY: true,
+                PARAM_CHANGE: true,
+                CALIBRATION_CHANGE: true,
+                OTA_START: true,
+                OTA_SUCCESS: true,
+                OTA_SUCCESS_PENDING_RECONNECT: true,
+                OTA_VERIFIED_AFTER_RECONNECT: true,
+                BATTERY_TEST_START: true,
+                BATTERY_TEST_SAMPLE: true
+            };
+
+            function safeNowIso_() {
+                return new Date().toISOString();
+            }
+
+            function safeIsoFromMs_(ms) {
+                if (!isFinite(ms) || ms <= 0 || ms > MAX_JS_DATE_MS_) return null;
+                var d = new Date(ms);
+                if (isNaN(d.getTime())) return null;
+                try {
+                    return d.toISOString();
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function isWallUsTick_(n) {
+                return isFinite(n) && n > 1e14;
+            }
+
+            function firstCsvFieldUs_(line) {
+                if (!line || line.indexOf("SUM,") === 0 || line.indexOf("SER,") === 0) return null;
+                if (line.slice(0, 12) === "SYNC_HEADER," || line.slice(0, 16) === "SYNC_SUM_HEADER,") return null;
+                var n = Number(String(line.split(",")[0] || "").trim());
+                return isWallUsTick_(n) ? n : null;
+            }
+
+            function resetClock() {
+                _syncWallTimeMs = 0;
+                _deviceMillisAtSync = null;
+                _wallUsBase = null;
+            }
+
+            function primeWallUsBaseFromLines_(lines) {
+                var minUs = null;
+                for (var i = 0; i < lines.length; i++) {
+                    var n = firstCsvFieldUs_(lines[i]);
+                    if (n == null) continue;
+                    if (minUs == null || n < minUs) minUs = n;
+                }
+                if (minUs != null) {
+                    _wallUsBase = minUs;
+                    _syncWallTimeMs = Date.now();
+                    _deviceMillisAtSync = null;
+                }
+            }
+
+            function applySyncHeaderValue_(raw) {
+                var n = Number(String(raw).trim());
+                if (isWallUsTick_(n)) {
+                    _wallUsBase = n;
+                    _deviceMillisAtSync = null;
+                    _syncWallTimeMs = Date.now();
+                    return;
+                }
+                if (isFinite(n) && n >= 1e12 && n < 1e14) {
+                    _wallUsBase = null;
+                    _deviceMillisAtSync = null;
+                    _syncWallTimeMs = n;
+                    return;
+                }
+                var hm = parseInt(raw, 10);
+                if (!isNaN(hm) && hm >= 0 && hm < 1e11) {
+                    _wallUsBase = null;
+                    _deviceMillisAtSync = hm;
+                    _syncWallTimeMs = Date.now();
+                }
+            }
+
+            function wallTimeFromDeviceMs_(deviceMs) {
+                try {
+                    var n = Number(String(deviceMs).trim());
+                    if (!isFinite(n)) return safeNowIso_();
+                    if (isWallUsTick_(n)) {
+                        if (_wallUsBase == null) {
+                            _wallUsBase = n;
+                            _syncWallTimeMs = Date.now();
+                        }
+                        var rel = safeIsoFromMs_(_syncWallTimeMs + (n - _wallUsBase) / 1000);
+                        if (rel) return rel;
+                        return safeNowIso_();
+                    }
+                    if (n >= 1e12 && n < 1e14) {
+                        var direct = safeIsoFromMs_(n);
+                        if (direct) return direct;
+                    }
+                    var eventMillis = parseInt(deviceMs, 10);
+                    if (_deviceMillisAtSync != null && !isNaN(eventMillis) && eventMillis >= 0 && eventMillis < 1e11) {
+                        var rel2 = safeIsoFromMs_(_syncWallTimeMs - (Number(_deviceMillisAtSync) - eventMillis));
+                        if (rel2) return rel2;
+                    }
+                    return safeNowIso_();
+                } catch (e) {
+                    console.warn("wallTimeFromDeviceMs_ failed:", deviceMs, e && e.message ? e.message : e);
+                    return safeNowIso_();
+                }
+            }
+
+            function parseSummaryLineToEvent_(line) {
+                var parts = line.split(",");
+                if (parts[0] === "SUM" && parts.length >= 10) {
+                    var wallEnd = parts[13];
+                    return {
+                        timestamp: wallTimeFromDeviceMs_(wallEnd && wallEnd !== "-1" ? wallEnd : parts[11]),
+                        sessionId: parts[1] || "",
+                        eventType: "SESSION_SUMMARY",
+                        source: parts[8] || "",
+                        pulseNumber: parseInt(parts[6], 10),
+                        pulsesCompleted: parseInt(parts[5], 10),
+                        repeats: parseInt(parts[4], 10) || "",
+                        repeatsRemaining: parseInt(parts[18], 10),
+                        stopReason: parts[7] || "",
+                        batteryVoltage: parts[16] || "",
+                        batteryPercent: parts[17] || "",
+                        rawSummary: line,
+                        rawData: "result=" + (parts[9] || "") + ";fw=" + (parts[15] || ""),
+                        seriesId: parts[2] || "",
+                        cycleIndex: parts[3] || "",
+                        firmwareVersion: parts[15] || ""
+                    };
+                }
+                if (parts[0] === "SER" && parts.length >= 8) {
+                    var okC = parseInt(parts[2], 10) || 0;
+                    var failC = parseInt(parts[3], 10) || 0;
+                    var fwSer = "";
+                    if (String(parts[12] || "").match(/^\d+\.\d/)) fwSer = String(parts[12]).trim();
+                    else if (String(parts[11] || "").match(/^\d+\.\d/)) fwSer = String(parts[11]).trim();
+                    var wallStart2 = parts[10];
+                    var wallEnd2 = parts[11];
+                    if (!String(wallEnd2 || "").match(/^\d{12,}/) || wallEnd2 === "-1") wallEnd2 = parts[10];
+                    var serTs = safeNowIso_();
+                    var wsN = Number(wallStart2);
+                    var weN = Number(wallEnd2);
+                    if (isWallUsTick_(wsN) && isWallUsTick_(weN) && weN >= wsN) {
+                        serTs = safeIsoFromMs_(Date.now()) || serTs;
+                    } else {
+                        serTs = wallTimeFromDeviceMs_(wallEnd2 && wallEnd2 !== "-1" ? wallEnd2 : parts[11]);
+                    }
+                    return {
+                        timestamp: serTs,
+                        sessionId: parts[1] || "",
+                        eventType: "SERIES_SUMMARY",
+                        source: "AUTO",
+                        stopReason: parts[5] || "",
+                        repeats: parseInt(parts[7], 10) || parseInt(parts[4], 10) || "",
+                        pulsesCompleted: okC,
+                        rawSummary: line,
+                        rawData: "ok=" + okC + ";fail=" + failC + ";target=" + (parts[4] || "") +
+                            ";status=" + (parts[13] || "") + ";fw=" + fwSer,
+                        seriesId: parts[1] || "",
+                        firmwareVersion: fwSer
+                    };
+                }
+                return null;
+            }
+
+            function parseSerMetricsFromEv_(ev) {
+                var rawSum = String((ev && ev.rawSummary) || "").trim();
+                var rawData = String((ev && ev.rawData) || "");
+                if (rawSum.indexOf("SER,") === 0) {
+                    var parts = rawSum.split(",");
+                    return {
+                        ok: parseInt(parts[2], 10) || 0,
+                        fail: parseInt(parts[3], 10) || 0,
+                        target: parseInt(parts[4], 10) || 0,
+                        status: String(parts[13] || "").trim().toUpperCase()
+                    };
+                }
+                var okM = rawData.match(/ok=(\d+)/i);
+                var failM = rawData.match(/fail=(\d+)/i);
+                var tgtM = rawData.match(/target=(\d+)/i);
+                var stM = rawData.match(/status=([A-Za-z_]+)/i);
+                return {
+                    ok: okM ? parseInt(okM[1], 10) : Number(ev.pulsesCompleted) || 0,
+                    fail: failM ? parseInt(failM[1], 10) : 0,
+                    target: tgtM ? parseInt(tgtM[1], 10) : Number(ev.repeats) || 0,
+                    status: stM ? String(stM[1]).toUpperCase() : ""
+                };
+            }
+
+            function isPlausibleIsoYear_(iso) {
+                if (!iso) return false;
+                var d = new Date(iso);
+                if (isNaN(d.getTime())) return false;
+                var y = d.getFullYear();
+                return y >= 2020 && y <= 2035;
+            }
+
+            function isSeriesFaultEv_(ev) {
+                var m = parseSerMetricsFromEv_(ev);
+                if (m.fail > 0) return true;
+                if (m.status === "ABORT" || String(ev.rawSummary || "").indexOf(",ABORT") >= 0) return true;
+                var sr = String(ev.stopReason || "").toUpperCase();
+                if (SERIES_FAULT_STOPS[sr]) return true;
+                if (sr.indexOf("OTA") === 0) return true;
+                return false;
+            }
+
+            function isSeriesCompleteEv_(ev) {
+                var m = parseSerMetricsFromEv_(ev);
+                if (!m.target || m.target <= 0) return false;
+                if (m.ok >= m.target && m.fail === 0) return true;
+                if (m.status === "COMPLETE" && m.ok >= m.target) return true;
+                return false;
+            }
+
+            function isSessionEndCompleteOrFault_(ev) {
+                if (!isPlausibleIsoYear_(ev.timestamp)) return false;
+                var sr = String(ev.stopReason || "").toUpperCase();
+                if (SERIES_FAULT_STOPS[sr] || sr.indexOf("OTA") === 0) return true;
+                var pn = Number(ev.pulseNumber);
+                var pc = Number(ev.pulsesCompleted);
+                if (isFinite(pn) && pn > 0 && isFinite(pc) && pc >= pn) return true;
+                return false;
+            }
+
+            /** שמירה: סדרה מלאה (10/10) או תקלה; סשן — סיום/סיכום או WEB; בלי START מהצמיד */
+            function shouldUploadLogEvent_(ev) {
+                if (!ev || !ev.eventType) return false;
+                var et = String(ev.eventType).trim().toUpperCase();
+                if (!VALID_LOG_EVENT_TYPES[et]) return false;
+                var bp = Number(ev.batteryPercent);
+                if (ev.batteryPercent !== undefined && ev.batteryPercent !== null && ev.batteryPercent !== "" &&
+                    (!isFinite(bp) || bp < 0 || bp > 100)) return false;
+                var bv = Number(ev.batteryVoltage);
+                if (ev.batteryVoltage !== undefined && ev.batteryVoltage !== null && ev.batteryVoltage !== "" &&
+                    isFinite(bv) && (bv < 0 || bv > 6)) return false;
+                var pc = Number(ev.pulsesCompleted);
+                var pn = Number(ev.pulseNumber);
+                if (isFinite(pc) && pc > 100000) return false;
+                if (isFinite(pn) && pn > 10000) return false;
+                var src = String(ev.source || "").trim();
+                if (/^\d+$/.test(src) && (et.indexOf("SESSION") === 0 || et === "PARAM_CHANGE")) return false;
+
+                if (et === "SERIES_SUMMARY") {
+                    if (!isPlausibleIsoYear_(ev.timestamp) && !isSeriesFaultEv_(ev) && !isSeriesCompleteEv_(ev)) {
+                        ev.timestamp = safeNowIso_();
+                    }
+                    return isSeriesCompleteEv_(ev) || isSeriesFaultEv_(ev);
+                }
+                if (et === "SESSION_START") {
+                    return String(ev.source || "").toUpperCase() === "WEB";
+                }
+                if (et === "SESSION_END") {
+                    return isSessionEndCompleteOrFault_(ev);
+                }
+                if (et === "SESSION_SUMMARY") {
+                    return isSeriesCompleteEv_(ev) || isSeriesFaultEv_(ev) || isSessionEndCompleteOrFault_(ev);
+                }
+                return true;
+            }
+
+            function isValidLogEventForUpload_(ev) {
+                return shouldUploadLogEvent_(ev);
+            }
+
+            function filterEventsForUpload_(events) {
+                var kept = [];
+                var skipped = 0;
+                for (var i = 0; i < (events || []).length; i++) {
+                    if (shouldUploadLogEvent_(events[i])) kept.push(events[i]);
+                    else skipped++;
+                }
+                return { events: kept, skipped: skipped };
+            }
+
+            /** תיקון זמן לפי sessionId (Date.now) + הפרש millis — כשהסנכרון לא מיפה שעון קיר */
+            function enrichMillisTimestampsInBatch_(events) {
+                if (!events || !events.length) return events;
+                var nowMs = Date.now();
+                var groups = {};
+                for (var i = 0; i < events.length; i++) {
+                    var ev = events[i];
+                    var sid = String(ev.sessionId || "").trim();
+                    var sidN = Number(sid);
+                    if (!isFinite(sidN) || sidN < 1e12 || sidN >= 1e14) continue;
+                    if (!groups[sid]) groups[sid] = [];
+                    groups[sid].push(ev);
+                }
+                Object.keys(groups).forEach(function (sid) {
+                    var baseMs = Number(sid);
+                    var list = groups[sid];
+                    var minM = null;
+                    for (var j = 0; j < list.length; j++) {
+                        var raw = String(list[j].rawData || list[j].rawSummary || "");
+                        var mm = raw.match(/millis=(\d+)/i);
+                        if (!mm) continue;
+                        var m = Number(mm[1]);
+                        if (!isFinite(m)) continue;
+                        if (minM == null || m < minM) minM = m;
+                    }
+                    if (minM == null) return;
+                    for (var k = 0; k < list.length; k++) {
+                        var e = list[k];
+                        var raw2 = String(e.rawData || e.rawSummary || "");
+                        var mm2 = raw2.match(/millis=(\d+)/i);
+                        if (!mm2) continue;
+                        var m2 = Number(mm2[1]);
+                        if (!isFinite(m2)) continue;
+                        var curMs = 0;
+                        if (e.timestamp) {
+                            var d = new Date(e.timestamp);
+                            if (!isNaN(d.getTime())) curMs = d.getTime();
+                        }
+                        var nearNow = curMs > nowMs - 7200000;
+                        var et = String(e.eventType || "").toUpperCase();
+                        if (et === "SESSION_START" || nearNow || curMs > baseMs + 7200000) {
+                            var fixedMs = baseMs + (m2 - minM);
+                            if (fixedMs > nowMs + 120000) fixedMs = baseMs;
+                            var iso = safeIsoFromMs_(fixedMs);
+                            if (iso) e.timestamp = iso;
+                        }
+                    }
+                });
+                return events;
+            }
+
+            function parseLogCsvLineToEvent(line) {
+                try {
+                    if (typeof line === "string" && line.slice(0, 12) === "SYNC_HEADER,") {
+                        applySyncHeaderValue_(line.split(",")[1]);
+                        return null;
+                    }
+                    if (typeof line === "string" && line.slice(0, 16) === "SYNC_SUM_HEADER,") {
+                        applySyncHeaderValue_(line.split(",")[1]);
+                        return null;
+                    }
+                    var parts = line.split(",");
+                    if (parts.length < 12) return null;
+
+                    var millisStr = parts[0];
+                    var eventTypeNorm = String(parts[2] || "").trim().toUpperCase();
+                    if (eventTypeNorm === "SERIES_END") eventTypeNorm = "SERIES_SUMMARY";
+
+                    var batteryVoltageVal = null;
+                    var pulsesCompletedVal = null;
+                    var repeatsRemainingVal = null;
+                    var remainingVibrationsVal = null;
+                    var rawData = "";
+                    if (parts.length >= 17) {
+                        batteryVoltageVal = parseFloat(parts[12] || "");
+                        pulsesCompletedVal = parseInt(parts[13] || "", 10);
+                        repeatsRemainingVal = parseInt(parts[14] || "", 10);
+                        remainingVibrationsVal = parseInt(parts[15] || "", 10);
+                        rawData = parts.length > 16 ? parts.slice(16).join(",") : "";
+                    } else {
+                        rawData = parts.length > 12 ? parts.slice(12).join(",") : "";
+                    }
+
+                    var ev = {
+                        timestamp: wallTimeFromDeviceMs_(millisStr),
+                        sessionId: parts[1] || "",
+                        eventType: eventTypeNorm,
+                        source: parts[3] || "",
+                        vibratePower: parseInt(parts[4] || "0", 10) || 0,
+                        pulseInterval: parseInt(parts[5] || "0", 10) || 0,
+                        pulseNumber: parseInt(parts[6] || "0", 10) || 0,
+                        vibrationDuration: parseInt(parts[7] || "0", 10) || 0,
+                        pauseMinutes: parseInt(parts[8] || "0", 10) || 0,
+                        repeats: parseInt(parts[9] || "0", 10) || 0,
+                        stopReason: parts[10] || "",
+                        batteryPercent: parseInt(parts[11] || "0", 10) || 0,
+                        batteryVoltage: !isNaN(batteryVoltageVal) ? batteryVoltageVal : undefined,
+                        pulsesCompleted: !isNaN(pulsesCompletedVal) && pulsesCompletedVal >= 0 ? pulsesCompletedVal : undefined,
+                        repeatsRemaining: !isNaN(repeatsRemainingVal) && repeatsRemainingVal >= 0 ? repeatsRemainingVal : undefined,
+                        remainingVibrations: !isNaN(remainingVibrationsVal) && remainingVibrationsVal >= 0 ? remainingVibrationsVal : undefined,
+                        rawData: rawData || ("millis=" + millisStr)
+                    };
+                    if (!isValidLogEventForUpload_(ev)) return null;
+                    return ev;
+                } catch (e) {
+                    console.warn("Failed to parse log CSV line:", String(line || "").slice(0, 120), e && e.message ? e.message : e);
+                    return null;
+                }
+            }
+
+            function lineToLogEvent_(line) {
+                if (!line) return null;
+                var ev = null;
+                if (line.indexOf("SUM,") === 0 || line.indexOf("SER,") === 0) {
+                    ev = parseSummaryLineToEvent_(line);
+                } else {
+                    ev = parseLogCsvLineToEvent(line);
+                }
+                if (ev && !shouldUploadLogEvent_(ev)) {
+                    return null;
+                }
+                return ev;
+            }
+
+            root.GlLogParser = {
+                BUILD: BUILD,
+                resetClock: resetClock,
+                primeWallUsBaseFromLines_: primeWallUsBaseFromLines_,
+                applySyncHeaderValue_: applySyncHeaderValue_,
+                lineToLogEvent_: lineToLogEvent_,
+                shouldUploadLogEvent_: shouldUploadLogEvent_,
+                filterEventsForUpload_: filterEventsForUpload_,
+                enrichMillisTimestampsInBatch_: enrichMillisTimestampsInBatch_,
+                wallTimeFromDeviceMs_: wallTimeFromDeviceMs_
+            };
+
+            root.__GL_LOG_PARSER_BUILD = BUILD;
+            console.log("Golden Life gl-log-parser.js build:", BUILD);
+        })(typeof window !== "undefined" ? window : this);
+    </script>
+    <base target="_top" />
+    <title>Life Golden</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8fbfd;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+
+        #container {
+            background-color: #ffffff;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            padding: 12px;
+            width: fit-content;
+            max-width: 420px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 22px;
+            color: #007bff;
+            margin-bottom: 6px;
+        }
+
+        h1 small {
+            font-size: 0.65em;
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        label {
+            font-weight: 600;
+            margin-top: 4px;
+            display: block;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input[type="number"] {
+            width: 5em;
+            min-width: 4em;
+            max-width: 100%;
+            padding: 3px 6px;
+            margin-top: 2px;
+            margin-bottom: 4px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 5px 10px;
+            font-size: 13px;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 4px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #disconnectButton {
+            background-color: #dc3545;
+        }
+
+        #disconnectButton:hover {
+            background-color: #c82333;
+
+        }
+
+        #errorMessage {
+            color: #dc3545;
+            margin-top: 4px;
+            font-size: 13px;
+            display: none;
+        }
+
+        #controlPanel {
+            display: none;
+        }
+
+        #totalVibrations {
+            font-size: 28px;
+            color: #007bff;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .status-container {
+            margin-top: 6px;
+            background-color: #e9f7fd;
+            padding: 8px;
+            border-radius: 10px;
+        }
+
+        .status-container h3 {
+            margin-bottom: 0;
+            font-size: 15px;
+            color: #007bff;
+        }
+
+        .status-container span {
+            font-size: 26px;
+        }
+
+        @media (max-width: 600px) {
+            #container {
+                padding: 10px;
+                width: 90%;
+            }
+
+            h1 {
+                font-size: 20px;
+            }
+
+            input[type="number"] {
+                width: 5em;
+                font-size: 12px;
+            }
+
+            button {
+                font-size: 12px;
+                padding: 3px 8px;
+            }
+
+            .status-container {
+                padding: 6px;
+            }
+
+            .status-container h3 {
+                font-size: 14px;
+            }
+
+            .status-container span {
+                font-size: 24px;
+            }
+        }
+
+        #advancedOptions label {
+            margin-top: 2px;
+            font-weight: 600;
+            display: block;
+            color: #444;
+            font-size: 13px;
+        }
+
+        #advancedOptions input {
+            width: 5em;
+            min-width: 4em;
+            max-width: 100%;
+            padding: 3px 6px;
+            margin-top: 2px;
+            margin-bottom: 4px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        #advancedOptions h3 {
+            font-size: 15px;
+            color: #007bff;
+            margin-top: 4px;
+            margin-bottom: 2px;
+        }
+
+        #advancedOptions h3 span {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Styles for OTA section */
+        .ota-section {
+            border-top: 1px solid #eee;
+            margin-top: 8px;
+            padding-top: 8px;
+            text-align: left;
+        }
+
+        .ota-section h2 {
+            font-size: 17px;
+            color: #007bff;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+
+        .ota-section input[type="file"] {
+            display: block;
+            width: 100%;
+            max-width: 280px;
+            padding: 3px 6px;
+            margin-bottom: 4px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background-color: #f0f8ff;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 6px;
+            height: 20px;
+            margin-top: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #28a745;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+            font-size: 12px;
+            border-radius: 6px;
+            transition: width 0.3s ease-in-out;
+        }
+
+        #otaStatusMessage {
+            margin-top: 4px;
+            font-size: 13px;
+            color: #333;
+            text-align: center;
+            min-height: 20px;
+            /* To prevent layout shift */
+        }
+
+        /* Styles previously applied via inline attributes */
+        #disconnectButton {
+            display: none;
+        }
+
+        #statusMessage {
+            color: green;
+            margin-top: 4px;
+            font-size: 13px;
+        }
+
+        #batteryIcon {
+            color: #666;
+            font-size: 1.1em;
+            margin-right: 4px;
+        }
+
+        .battery-voltage-line {
+            display: block;
+            color: #6b7280;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        .battery-test-button {
+            background: #7c3aed;
+        }
+
+        /* NMPT dual-bracelet panel (hand + leg) */
+        #nmptDualPanel {
+            display: none;
+            margin-top: 16px;
+            border-top: 2px solid #0d9488;
+            padding-top: 12px;
+        }
+        #nmptDualPanel.is-visible {
+            display: block;
+        }
+        #nmptDualPanel > h2 {
+            color: #0d9488;
+        }
+        #nmptDualBanner {
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+        #nmptLegCard {
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        #nmptLegStatus {
+            margin-bottom: 8px;
+            color: #64748b;
+        }
+        #nmptLegStatus.is-connected {
+            color: #16a34a;
+        }
+        #nmptLegStatus.is-disconnected {
+            color: #dc2626;
+        }
+        .nmpt-dual-actions {
+            margin-top: 12px;
+        }
+        #nmptSaveActivateBtn {
+            background: #0d9488;
+        }
+        #nmptDualStatus {
+            margin-top: 8px;
+            color: #0d9488;
+        }
+        #nmptDualStatus.is-error {
+            color: #dc2626;
+        }
+
+        #firmwareVersionBar {
+            margin: 8px 0 10px;
+            padding: 8px 12px;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #0369a1;
+            text-align: center;
+            display: none;
+        }
+
+        #firmwareVersionBar strong {
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .firmware-verified-sub {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #0c4a6e;
+            font-weight: 600;
+        }
+
+        #firmwareVersionBleWrap {
+            display: none;
+        }
+
+        #firmwareVersionBleWrap.is-visible {
+            display: block;
+        }
+
+        #connectOtaButton {
+            display: none;
+            background: #0d9488;
+            margin-top: 4px;
+        }
+
+        #connectOtaButton.is-visible {
+            display: flex;
+        }
+
+        #connectOtaButton:hover {
+            background: #0f766e;
+        }
+
+        #customerGreeting {
+            display: none;
+            margin-top: 6px;
+            padding: 8px 12px;
+            background: #ecfdf5;
+            border-radius: 8px;
+            color: #047857;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        #customerGreeting.is-visible {
+            display: block;
+        }
+
+        #advancedOptions {
+            display: none;
+            margin-top: 6px;
+        }
+
+        .advanced-note {
+            display: block;
+            margin-bottom: 4px;
+            color: gray;
+            font-size: 12px;
+        }
+
+        .advanced-divider {
+            margin-top: 6px;
+            margin-bottom: 6px;
+            border-top: 1px solid #eee;
+        }
+
+        #envBanner {
+            display: none;
+            margin: 8px 0 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.45;
+            text-align: right;
+        }
+
+        #envBanner.warn {
+            display: block;
+            background: #fff7ed;
+            border: 1px solid #fdba74;
+            color: #9a3412;
+        }
+
+        #envBanner.ok {
+            display: block;
+            background: #ecfdf5;
+            border: 1px solid #6ee7b7;
+            color: #047857;
+        }
+
+        #envBanner a {
+            color: #007bff;
+            font-weight: 600;
+        }
+
+        #macRegNotification {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            background: #fff;
+            border: 2px solid #007bff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+            max-width: 340px;
+            font-family: sans-serif;
+            direction: rtl;
+        }
+
+        #macRegNotification.is-visible {
+            display: block;
+        }
+
+        .mac-reg-notification-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .mac-reg-notification-title {
+            color: #007bff;
+            font-size: 15px;
+        }
+
+        .mac-reg-notification-close {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: #666;
+            width: auto;
+            padding: 0;
+            margin: 0;
+        }
+
+        .mac-reg-notification-close:hover {
+            background: none;
+            color: #333;
+        }
+
+        #macRegMsg {
+            font-size: 13px;
+            margin: 0 0 10px;
+            color: #333;
+        }
+
+        #macRegLink {
+            display: inline-block;
+            background: #007bff;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .ble-connect-hint {
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 10px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #1e3a8a;
+            text-align: right;
+        }
+
+        .ble-picker-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(15, 23, 42, 0.55);
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .ble-picker-modal.is-open {
+            display: flex;
+        }
+
+        .ble-picker-dialog {
+            width: min(420px, 100%);
+            max-height: min(80vh, 520px);
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .ble-picker-dialog__head {
+            padding: 16px 18px 10px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .ble-picker-dialog__head h2 {
+            margin: 0 0 6px;
+            font-size: 1.1rem;
+            color: #111827;
+        }
+
+        .ble-picker-dialog__head p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: #6b7280;
+            line-height: 1.45;
+        }
+
+        #blePickerStatus {
+            padding: 8px 18px;
+            font-size: 0.82rem;
+            color: #0369a1;
+            background: #f0f9ff;
+            border-bottom: 1px solid #e0f2fe;
+        }
+
+        #blePickerList {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .ble-picker-empty {
+            margin: 0;
+            padding: 20px 12px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .ble-picker-item {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+            width: 100%;
+            margin: 0 0 8px;
+            padding: 12px 14px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            background: #f9fafb;
+            cursor: pointer;
+            text-align: right;
+            font-family: inherit;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .ble-picker-item:hover,
+        .ble-picker-item:focus {
+            border-color: #2563eb;
+            background: #eff6ff;
+            outline: none;
+        }
+
+        .ble-picker-item__title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .ble-picker-item__mac {
+            font-family: ui-monospace, Consolas, monospace;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            color: #1d4ed8;
+            direction: ltr;
+            text-align: left;
+        }
+
+        .ble-picker-item__rssi {
+            font-size: 0.78rem;
+            color: #6b7280;
+        }
+
+        .ble-picker-dialog__foot {
+            padding: 12px 18px 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .ble-picker-dialog__foot button {
+            width: 100%;
+            margin: 0;
+            background: #e5e7eb;
+            color: #111827;
+            box-shadow: none;
+        }
+    </style>
+    <script type="application/json"
+        id="server-web-app-base">"https://script.google.com/macros/s/AKfycbxx6TBP0UoK34rli1a5jzxhIvZeaho6bq3W5HCXNScLbmOPjLrtbqRaknUVS3JZGZt1/exec"</script>
+</head>
+
+<body>
+    <div id="container">
+        <h1>בקרת צמיד</h1>
+        <div id="envBanner" role="status"></div>
+        <div id="firmwareVersionBar" aria-live="polite">
+            <div>גרסת קושחה: <strong id="firmwareVersionDisplay">—</strong></div>
+            <div id="firmwareVersionBleWrap" class="firmware-verified-sub">BLE מדווח: <span
+                    id="firmwareVersionBle">—</span></div>
+        </div>
+
+        <div id="errorMessage">Failed to connect to BLE device. Please try again.</div>
+
+        <p class="ble-connect-hint" id="bleConnectHint">
+            לחצו «התחבר לצמיד» — יופיע רשימת צמידים Golden Life עם <strong>כתובת MAC</strong> ברורה (למשל <span
+                dir="ltr">543204309E5E</span>).
+            בחרו את הצמיד שלכם לפי ה-MAC שעל גב הכרטיס או באריזה.
+        </p>
+
+        <button id="connectButton" onclick="connectBLE(false)">
+            <i class="fas fa-plug"></i> התחבר לצמיד
+        </button>
+        <button id="connectOtaButton" onclick="connectBLE(true)">
+            <i class="fas fa-microchip"></i> התחבר לעדכון קושחה בלבד
+        </button>
+        <button id="disconnectButton" onclick="disconnectBLE()">
+            <i class="fas fa-times-circle"></i> ניתוק
+        </button>
+        <div id="statusMessage"></div>
+        <div id="customerGreeting"></div>
+        <div id="controlPanel">
+            <h3>
+                <i id="batteryIcon" class="fas fa-battery-empty"></i>
+                מצב סוללה: <span id="batteryPercentageDisplay">--</span>%
+                <small class="battery-voltage-line">מתח: <span id="batteryVoltageDisplay">--</span>V</small>
+            </h3>
+            <h3>תרחישים שנותרו: <span id="remainingScenariosDisplay">--</span></h3>
+
+            <label for="vibratePower">Vibrate Power:</label>
+            <input type="number" id="vibratePower" min="160" max="255" placeholder="Enter Vibrate Power"
+                onchange="updateBLEValue('vibratePower')">
+
+            <label for="pulseInterval">Pulse Interval (ms):</label>
+            <input type="number" id="pulseInterval" min="100" max="5000" placeholder="Enter Pulse Interval"
+                onchange="updateBLEValue('pulseInterval')">
+
+
+            <label for="pulseNumber">Pulse Number:</label>
+            <input type="number" id="pulseNumber" min="1" max="2000" placeholder="Enter Pulse Number"
+                onchange="updateBLEValue('pulseNumber')">
+
+            <label for="vibrationDuration">Vibration Duration (ms):</label>
+            <input type="number" id="vibrationDuration" min="100" max="2000" placeholder="Enter Vibration Duration"
+                onchange="updateBLEValue('vibrationDuration')">
+            <button id="startButton" onclick="startScenario()">
+                <i class="fas fa-play-circle"></i> התחל
+            </button>
+            <button id="stopButton" onclick="stopScenario()">
+                <i class="fas fa-stop-circle"></i> עצור סנריו
+            </button>
+            <button id="batteryTestButton" class="battery-test-button" onclick="startBatteryTest()">
+                <i class="fas fa-battery-half"></i> בדיקת סוללה
+            </button>
+
+            <!-- NMPT: פאנל מצב זוגי (יד + רגל) — מוצג רק כשהמשתמש מוגדר DUAL -->
+            <div id="nmptDualPanel">
+                <h2><i class="fas fa-link"></i> מצב זוגי — יד + רגל</h2>
+                <div id="nmptDualBanner"></div>
+
+                <!-- כרטיס רגל -->
+                <div id="nmptLegCard">
+                    <h3><i class="fas fa-shoe-prints"></i> צמיד רגל (LEG)</h3>
+                    <div id="nmptLegStatus">לא מחובר</div>
+                    <button id="nmptConnectLegBtn" onclick="connectLegDevice()">
+                        <i class="fas fa-bluetooth-b"></i> חבר את צמיד הרגל
+                    </button>
+
+                    <label for="legVibratePower">Vibrate Power (רגל):</label>
+                    <input type="number" id="legVibratePower" min="160" max="255" value="195">
+                    <label for="legPulseInterval">Pulse Interval (רגל, ms):</label>
+                    <input type="number" id="legPulseInterval" min="100" max="5000" value="1000">
+                    <label for="legPulseNumber">Pulse Number (רגל):</label>
+                    <input type="number" id="legPulseNumber" min="1" max="2000" value="60">
+                    <label for="legVibrationDuration">Vibration Duration (רגל, ms):</label>
+                    <input type="number" id="legVibrationDuration" min="100" max="2000" value="400">
+                </div>
+
+                <label for="nmptLegDelayInput">זמן השהיית הפעלת רגל (בשניות):</label>
+                <input type="number" id="nmptLegDelayInput" min="1" max="3600" value="20" />
+                <small class="advanced-note">הרגל תופעל אוטומטית כעבור מספר השניות הזה אחרי הפעלת היד.</small>
+
+                <div class="nmpt-dual-actions">
+                    <button id="nmptSaveActivateBtn" class="battery-test-button" onclick="saveAndActivateDual()">
+                        <i class="fas fa-play-circle"></i> שמור והפעל (יד + רגל)
+                    </button>
+                    <button id="nmptStopBothBtn" onclick="stopBoth()">
+                        <i class="fas fa-stop-circle"></i> עצור הכל
+                    </button>
+                </div>
+                <div id="nmptDualStatus"></div>
+            </div>
+
+            <button onclick="toggleAdvancedOptions()"><i class="fas fa-cogs"></i> אפשרויות מתקדמות</button>
+
+            <div id="advancedOptions">
+                <label for="postDelay">זמן השהייה בין תרחישים (בדקות)</label>
+                <input id="postDelay" type="number" min="10" max="65535" value="10"
+                    onchange="updateBLEValue('postDelay')" />
+
+                <small class="advanced-note">מינימום 10 דקות</small>
+                <label for="repeatCount">מספר חזרות:</label>
+                <input id="repeatCount" type="number" min="1" max="255" value="1"
+                    onchange="updateBLEValue('repeatCount')" />
+
+                <hr class="advanced-divider">
+                <div class="ota-section">
+                    <h2>עדכון קושחה (OTA)</h2>
+                    <input type="file" id="firmwareFile" accept=".bin">
+                    <button id="startOtaButton" onclick="startOtaUpdate()" disabled>
+                        <i class="fas fa-cloud-upload-alt"></i> התחל עדכון קושחה
+                    </button>
+                    <!-- ADDED id="otaProgressBarContainer" HERE -->
+                    <div class="progress-bar-container" id="otaProgressBarContainer">
+                        <div class="progress-bar" id="otaProgressBar">0%</div>
+                    </div>
+                    <div id="otaStatusMessage"></div>
+                </div>
+            </div> <!-- Correctly closing advancedOptions -->
+
+            <h3>Remaining Vibrations: <span id="totalVibrations">0</span></h3>
+        </div> <!-- Correctly closing controlPanel -->
+    </div>
+    <div id="blePickerModal" class="ble-picker-modal" role="dialog" aria-labelledby="blePickerTitle" aria-modal="true">
+        <div class="ble-picker-dialog">
+            <div class="ble-picker-dialog__head">
+                <h2 id="blePickerTitle">בחירת צמיד Golden Life</h2>
+                <p>בחרו את הצמיד לפי כתובת MAC (מוצגת עם נקודותיים). הצמיד הקרוב ביותר מופיע ראשון.</p>
+            </div>
+            <div id="blePickerStatus">סורק מכשירים…</div>
+            <div id="blePickerList"></div>
+            <div class="ble-picker-dialog__foot">
+                <button type="button" id="blePickerCancel">ביטול</button>
+            </div>
+        </div>
+    </div>
+    <div id="macRegNotification">
+        <div class="mac-reg-notification-header">
+            <strong class="mac-reg-notification-title">⚠ צמיד לא רשום</strong>
+            <button type="button" class="mac-reg-notification-close" onclick="closeRegNotif()">×</button>
+        </div>
+        <p id="macRegMsg"></p>
+        <a id="macRegLink" href="#" target="_blank">פתח טופס רישום</a>
+    </div>
+</body>
+<script>
+    let device, server, service, charStart, charStop, charVibratePower, charPulseInterval, charPulseNumber,
+        charVibrationDuration, charVibrationStatus;
+
+    // --- NMPT: מצב צמיד כפול (יד+רגל) — ארכיטקטורה A (ריליי דרך הטלפון) ---
+    let legDevice = null, legServer = null, legService = null,
+        legCharStart = null, legCharVibratePower = null, legCharPulseInterval = null,
+        legCharPulseNumber = null, legCharVibrationDuration = null;
+    let nmptMode = 'SINGLE';          // SINGLE | DUAL
+    let nmptLegDelaySec = 20;         // ברירת מחדל 20 שניות
+    let nmptHandMac = '', nmptLegMac = '';
+    let nmptLegTimer = null;          // טיימר JS להפעלת הרגל
+
+    // OTA related characteristics
+    let otaService, otaControlChar, otaDataChar, otaStatusChar;
+    // --- UPDATED UUIDs TO MATCH ESP32 CODE (AND NOW LOWERCASE FOR WEB BLUETOOTH) ---
+    const otaServiceUuid = "501a0001-08ee-4dee-ae83-3a19c0e28b02";
+    const otaControlCharUuid = "501a0003-08ee-4dee-ae83-3a19c0e28b02";
+    const otaDataCharUuid = "501a0002-08ee-4dee-ae83-3a19c0e28b02";
+    const otaStatusCharUuid = "501a0004-08ee-4dee-ae83-3a19c0e28b02";
+
+    // --- Main Service and Characteristics UUIDs (also converted to lowercase) ---
+    const mainServiceUuid = "069f372b-274b-4198-a099-74f2791734a5";
+    const charUuidVibratePower = "84a054be-6a59-402c-9f49-cf3a5a0c230b";
+    const charUuidPulseInterval = "53843d2f-2a09-4614-8776-fc8a68fee4b9";
+    const charUuidPulseNumber = "8c29fc39-27ae-4e90-a7de-eb3eb4f820bf";
+    const charUuidVibrationDuration = "7737e412-351e-4245-9e79-b2a5673a5abf";
+    const charUuidStartStop = "66ccf7cf-6a9e-4eda-b868-515dd5b9eb8b";
+    const charUuidVibrationStatus = "12cfcb54-2b8a-4da4-a737-f040b6f79fc7";
+    // --- NMPT: מאפיין הגדרת מכשיר (role + leg_activation_delay_sec) ---
+    const charUuidDeviceConfig = "a3b9f1c2-1d4e-4b8a-9c7d-2e5f6a7b8c9d";
+
+    // --- Log Service UUIDs (match ESP32 LOG_SERVICE_UUID etc.) ---
+    const logServiceUuid = "8c9f0001-1b2b-4f5a-9e1a-1234567890ab";
+    const logControlCharUuid = "8c9f0002-1b2b-4f5a-9e1a-1234567890ab";
+    const logDataCharUuid = "8c9f0003-1b2b-4f5a-9e1a-1234567890ab";
+
+
+    const OTA_COMMAND_START = 0x01;
+    const OTA_COMMAND_END = 0x02;
+    const OTA_COMMAND_ABORT = 0x03; // Note: ESP32 code uses 0x03 for CANCEL OTA
+    const MAX_CHUNK_SIZE = 180;
+    const OTA_CHUNK_DELAY_MS = 55;
+    const OTA_REBOOT_WAIT_MS = 5000;
+    const BLE_CMD_STOP = 0;
+    const BLE_CMD_START = 1;
+    const BLE_CMD_STATUS = 2;
+    const BLE_CMD_UPDATE_CONFIG = 3;
+    const BLE_CMD_BATTERY_TEST = 4;
+
+    let connectionInterval;
+
+    // --- תור פעולות GATT – מונע "GATT operation already in progress" ---
+    let gattQueue = Promise.resolve();
+    async function runGattOp(fn) {
+        const prev = gattQueue;
+        let resolve;
+        gattQueue = new Promise(function (r) { resolve = r; });
+        try {
+            await prev;
+            await fn();
+        } catch (e) {
+            throw e;
+        } finally {
+            resolve();
+        }
+    }
+
+    // --- Log sync state ---
+    let logControlChar = null;
+    let logDataChar = null;
+    let isSyncingLogs = false;
+
+    // --- Google Apps Script logging endpoint ---
+    const CHAR_UUID_VERSION = 'f1234567-0000-1000-8000-00805f9b34fb';
+    let _currentFirmwareVersion = 'unknown';
+    /** Goldenlife — קושחה משוחררת מהשרת (Drive / firmware\\), לא מתיקיית בדיקה מקומית */
+    const USE_LOCAL_TEST_FIRMWARE = false;
+    let _isInventoryMode = false; // true כשהצמיד המחובר הוא ממלאי ולא רשום ללקוח
+    let _bleConnecting = false;   // true במהלך connectBLE — מונע איפוס UI מ-disconnect race
+    let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
+    let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
+    let _otaEndCommandSent = false;
+    let _otaExpectedReboot = false;
+    let _otaStartedAt = 0;
+    let _otaRebootGraceTimer = null;
+    /** מטא-דאטה לעדכון ידני (קובץ .bin) — לרישום ב-FirmwareUpdates כשהמכשיר מדווח OTA_COMPLETE */
+    let _pendingManualOtaMeta = null;
+
+    function setOtaBleLock_(locked, statusText) {
+        _otaInProgress = !!locked;
+        var discBtn = document.getElementById('disconnectButton');
+        var connBtn = document.getElementById('connectButton');
+        var connOtaBtn = document.getElementById('connectOtaButton');
+        if (discBtn) {
+            discBtn.disabled = !!locked;
+            discBtn.title = locked ? 'לא ניתן לנתק בזמן עדכון קושחה' : '';
+        }
+        if (connBtn && locked) connBtn.disabled = true;
+        if (connOtaBtn && locked) connOtaBtn.disabled = true;
+        if (!locked) {
+            if (connBtn) connBtn.disabled = false;
+            if (connOtaBtn) connOtaBtn.disabled = false;
+        }
+        if (locked && statusText) {
+            var sm = document.getElementById('statusMessage');
+            if (sm) sm.textContent = statusText;
+        }
+    }
+
+    function finishOtaSession_(options) {
+        options = options || {};
+        _otaInProgress = false;
+        _otaAwaitingReboot = false;
+        _otaEndCommandSent = false;
+        _otaExpectedReboot = false;
+        if (_otaRebootGraceTimer) {
+            clearTimeout(_otaRebootGraceTimer);
+            _otaRebootGraceTimer = null;
+        }
+        var discBtn = document.getElementById('disconnectButton');
+        if (discBtn) {
+            discBtn.disabled = false;
+            discBtn.title = '';
+        }
+        var connBtn = document.getElementById('connectButton');
+        var connOtaBtn = document.getElementById('connectOtaButton');
+        var stillOn = !!(device && device.gatt && device.gatt.connected);
+        if (connBtn) connBtn.disabled = stillOn;
+        if (connOtaBtn) connOtaBtn.disabled = stillOn;
+        if (options.resetUi) handleBleDisconnected();
+    }
+
+    function scheduleOtaRebootGrace_(ms) {
+        if (_otaRebootGraceTimer) clearTimeout(_otaRebootGraceTimer);
+        _otaRebootGraceTimer = setTimeout(function () {
+            if (_otaAwaitingReboot) finishOtaSession_({ resetUi: false });
+        }, ms || 120000);
+    }
+
+    function bleDropIgnoredDuringOta_() {
+        return _otaInProgress || _otaAwaitingReboot;
+    }
+
+    const LOG_WEBAPP_URL_FALLBACK = "https://script.google.com/macros/s/AKfycbxx6TBP0UoK34rli1a5jzxhIvZeaho6bq3W5HCXNScLbmOPjLrtbqRaknUVS3JZGZt1/exec";
+
+    function readServerWebAppBase_() {
+        var el = document.getElementById('server-web-app-base');
+        if (!el) return '';
+        var t = String(el.textContent || '').trim();
+        if (!t || t.indexOf('<' + '?') >= 0) return '';
+        try {
+            var v = JSON.parse(t);
+            return (typeof v === 'string' && v) ? v.split(/[?#]/)[0] : '';
+        } catch (e) { return ''; }
+    }
+
+    function resolveLocalLabProxyUrl_() {
+        try {
+            var loc = window.location;
+            var host = String(loc.hostname || '').toLowerCase();
+            if (host !== '127.0.0.1' && host !== 'localhost') return '';
+            return loc.protocol + '//' + loc.host + '/lab-proxy/exec';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function resolveLogWebAppUrl_() {
+        // Goldenlife.html מדבר ישירות ל-Apps Script (file:// / localhost טלפוני) — בלי lab-proxy (זה תפקיד Goldenlife_Lab.html)
+        var fromServer = readServerWebAppBase_();
+        if (fromServer) return fromServer;
+        var href = String(window.location.href || '');
+        var base = href.split(/[?#]/)[0];
+        if (/^https:\/\/script\.google\.com\/macros\/s\//i.test(base)) return base;
+        return LOG_WEBAPP_URL_FALLBACK;
+    }
+
+    const LOG_WEBAPP_URL = resolveLogWebAppUrl_();
+
+    /** GET JSON מהשרת — localhost/Web App: fetch; file://: JSONP (callback) */
+    function jsonpGet_(url, timeoutMs) {
+        var waitMs = (timeoutMs != null && isFinite(timeoutMs)) ? Number(timeoutMs) : 15000;
+        if (waitMs < 3000) waitMs = 3000;
+        if (waitMs > 60000) waitMs = 60000;
+        return new Promise(function (resolve, reject) {
+            var cb = 'glJsonp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            var sep = url.indexOf('?') >= 0 ? '&' : '?';
+            var script = document.createElement('script');
+            var timer = setTimeout(function () {
+                cleanup();
+                reject(new Error('JSONP timeout'));
+            }, waitMs);
+            function cleanup() {
+                clearTimeout(timer);
+                try { delete window[cb]; } catch (ignore) { window[cb] = undefined; }
+                if (script.parentNode) script.parentNode.removeChild(script);
+            }
+            window[cb] = function (data) {
+                cleanup();
+                resolve(data);
+            };
+            script.async = true;
+            script.onerror = function () {
+                cleanup();
+                reject(new Error('JSONP load failed'));
+            };
+            script.src = url + sep + 'callback=' + encodeURIComponent(cb);
+            document.head.appendChild(script);
+        });
+    }
+
+    var MAC_REG_CACHE_KEY_ = 'gl_mac_reg_cache_v1';
+    var MAC_REG_CACHE_TTL_MS_ = 7 * 24 * 60 * 60 * 1000;
+
+    function readMacRegCache_() {
+        try {
+            var raw = localStorage.getItem(MAC_REG_CACHE_KEY_);
+            if (!raw) return {};
+            var o = JSON.parse(raw);
+            return (o && typeof o === 'object') ? o : {};
+        } catch (e) { return {}; }
+    }
+
+    function writeMacRegCache_(map) {
+        try { localStorage.setItem(MAC_REG_CACHE_KEY_, JSON.stringify(map || {})); } catch (e) { }
+    }
+
+    function getCachedMacReg_(macNorm) {
+        var mac = String(macNorm || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        if (!mac) return null;
+        var map = readMacRegCache_();
+        var row = map[mac];
+        if (!row || !row.ts) return null;
+        if (Date.now() - Number(row.ts) > MAC_REG_CACHE_TTL_MS_) return null;
+        return row.data || null;
+    }
+
+    function setCachedMacReg_(macNorm, data) {
+        var mac = String(macNorm || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        if (!mac || !data) return;
+        var map = readMacRegCache_();
+        map[mac] = { ts: Date.now(), data: data };
+        writeMacRegCache_(map);
+    }
+
+    async function fetchServerGetJson_(queryString, opts) {
+        opts = opts || {};
+        var qs = String(queryString || '').trim();
+        if (qs.charAt(0) === '?') qs = qs.slice(1);
+        var url = LOG_WEBAPP_URL + (qs ? ('?' + qs) : '');
+        // file:// וגם localhost (טלפון/מקומי בלי proxy) → JSONP, כדי לעקוף CORS מול Apps Script
+        if (isFileOrigin_() || isLocalLabHost_()) {
+            return jsonpGet_(url, opts.timeoutMs != null ? opts.timeoutMs : 15000);
+        }
+        var ctrl = null;
+        var timer = null;
+        try {
+            if (typeof AbortController !== 'undefined' && opts.timeoutMs) {
+                ctrl = new AbortController();
+                timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { } }, opts.timeoutMs);
+            }
+            var resp = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return await resp.json();
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    /** בדיקת רישום — מטמון מקומי קודם, אחרת שרת עם timeout קצר (לא חוסם דקות). */
+    async function checkMacRegistrationQuick_(macNorm) {
+        var mac = String(macNorm || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        if (!mac) return null;
+        var cached = getCachedMacReg_(mac);
+        if (cached && cached.ok) return cached;
+        var data = await fetchServerGetJson_('action=checkMac&mac=' + encodeURIComponent(mac), { timeoutMs: 12000 });
+        if (data && data.ok) setCachedMacReg_(mac, data);
+        return data;
+    }
+
+    function fireAndForgetServerGet_(queryString) {
+        fetchServerGetJson_(queryString).catch(function (err) {
+            console.warn('fireAndForgetServerGet_ failed:', err);
+        });
+    }
+
+    function isFileOrigin_() {
+        return String(window.location.protocol || '').toLowerCase() === 'file:';
+    }
+
+    function isLocalLabHost_() {
+        try {
+            var host = String(window.location.hostname || '').toLowerCase();
+            return host === '127.0.0.1' || host === 'localhost';
+        } catch (e) { return false; }
+    }
+
+    /** Web App / lab proxy: POST JSON + קריאת תשובה; file://: no-cors (לוגים מגיעים לשרת בלי CORS) */
+    function useJsonCorsPost_() {
+        // file:// וגם localhost בלי proxy → no-cors POST (לוגים best-effort, בלי כשל CORS)
+        if (isFileOrigin_()) return false;
+        if (isLocalLabHost_()) return false;  // localhost טלפוני בלי proxy → no-cors POST (לוגים best-effort)
+        var href = String(window.location.href || '');
+        if (/^https:\/\/script\.google\.com\/macros\/s\//i.test(href)) return true;
+        if (readServerWebAppBase_()) return true;
+        return isLocalLabHost_();
+    }
+
+    function buildLogPostOptions_(payload) {
+        var opts = { method: 'POST', body: JSON.stringify(payload) };
+        if (useJsonCorsPost_()) {
+            opts.headers = { 'Content-Type': 'application/json' };
+        } else {
+            opts.mode = 'no-cors';
+        }
+        return opts;
+    }
+
+    function isSecureBleContext_() {
+        // Goldenlife/avihay רצים כקובץ מקומי (file://). רק Lab דורש localhost.
+        var proto = String(window.location.protocol || '').toLowerCase();
+        if (proto === 'file:') return !!navigator.bluetooth;
+        return !!window.isSecureContext && !!navigator.bluetooth;
+    }
+
+    function initGoldenLifeEnvironmentBanner_() {
+        var banner = document.getElementById('envBanner');
+        if (!banner) return;
+        var proto = String(window.location.protocol || '').toLowerCase();
+        var hosted = !!readServerWebAppBase_() || /^https:\/\/script\.google\.com\/macros\/s\//i.test(window.location.href || '');
+        if (hosted && proto !== 'file:') {
+            banner.className = 'warn';
+            banner.textContent = 'Goldenlife.html מיועד לקובץ מקומי — פתחו עם open-local.bat (file://), לא מ-Apps Script.';
+            return;
+        }
+        if (!navigator.bluetooth) {
+            banner.className = 'warn';
+            banner.textContent = 'Web Bluetooth לא זמין בדפדפן זה — השתמשו ב-Chrome במחשב.';
+            return;
+        }
+        banner.className = 'ok';
+        if (proto === 'file:') {
+            banner.textContent = 'מצב מקומי (קובץ): לוגים ורישום נשלחים לשרת ב-JSONP. סנכרון לוגים עד פעם ב-48 שעות.';
+        } else {
+            var labHint = resolveLocalLabProxyUrl_() ? ' (פרוקסי מקומי)' : ' (JSONP → Apps Script)';
+            banner.textContent = 'מצב מקומי: לוגים ורישום נשלחים לשרת.' + labHint;
+        }
+    }
+
+    var FW_PENDING_STORAGE_KEY = 'gl_pending_fw_logs';
+    var FW_PENDING_MAX = 20;
+
+    function loadPendingFwLogs() {
+        try {
+            var raw = localStorage.getItem(FW_PENDING_STORAGE_KEY);
+            if (!raw) return [];
+            var a = JSON.parse(raw);
+            return Array.isArray(a) ? a : [];
+        } catch (e) { return []; }
+    }
+
+    function savePendingFwLogs(arr) {
+        try {
+            localStorage.setItem(FW_PENDING_STORAGE_KEY, JSON.stringify(arr));
+        } catch (e) { }
+    }
+
+    function enqueuePendingFwLog(entry) {
+        var arr = loadPendingFwLogs();
+        var dedupeKey = String(entry.mac || '') + '|' + String(entry.oldVer || '') + '|' +
+            String(entry.newVer || '') + '|' + String(entry.status || '');
+        arr = arr.filter(function (e) {
+            return (String(e.mac || '') + '|' + String(e.oldVer || '') + '|' +
+                String(e.newVer || '') + '|' + String(e.status || '')) !== dedupeKey;
+        });
+        arr.push(entry);
+        while (arr.length > FW_PENDING_MAX) arr.shift();
+        savePendingFwLogs(arr);
+    }
+
+    /**
+     * effectiveText  — הגרסה הטובה ביותר הידועה (מגיליון E/H, אם גבוה יותר מ-BLE)
+     * bleText        — מה שהצמיד מדווח ב-BLE (מוצג בשורה משנית אם שונה מ-effective)
+     */
+    function setFirmwareVersionBanner(visible, effectiveText, bleText) {
+        var bar = document.getElementById('firmwareVersionBar');
+        var el = document.getElementById('firmwareVersionDisplay');
+        var bleWrap = document.getElementById('firmwareVersionBleWrap');
+        var bleEl = document.getElementById('firmwareVersionBle');
+        if (bar) bar.style.display = visible ? 'block' : 'none';
+        if (!visible) {
+            if (bleWrap) bleWrap.classList.remove('is-visible');
+            return;
+        }
+        if (el) el.textContent = effectiveText != null ? effectiveText : '\u2014';
+        if (bleWrap && bleEl) {
+            var ble = bleText != null ? String(bleText).trim() : '';
+            var eff = effectiveText != null ? String(effectiveText).trim() : '';
+            if (ble && ble !== eff) {
+                bleEl.textContent = ble;
+                bleWrap.classList.add('is-visible');
+            } else {
+                bleWrap.classList.remove('is-visible');
+            }
+        }
+    }
+
+    async function flushPendingFirmwareLogs() {
+        if (!LOG_WEBAPP_URL) return;
+        var arr = loadPendingFwLogs();
+        if (!arr.length) return;
+        var remaining = [];
+        for (var i = 0; i < arr.length; i++) {
+            var e = arr[i];
+            try {
+                var notesTrim = String(e.notes || '').slice(0, 350);
+                var j = await fetchServerGetJson_(
+                    'action=logFwUpdate&mac=' + encodeURIComponent(e.mac) +
+                    '&oldVer=' + encodeURIComponent(String(e.oldVer || '')) +
+                    '&newVer=' + encodeURIComponent(String(e.newVer || '')) +
+                    '&status=' + encodeURIComponent(String(e.status || '\u05d4\u05e6\u05dc\u05d9\u05d7\u05d4')) +
+                    '&notes=' + encodeURIComponent(notesTrim)
+                );
+                if (!(j && j.ok)) remaining.push(e);
+            } catch (err) {
+                remaining.push(e);
+            }
+        }
+        savePendingFwLogs(remaining);
+        if (!remaining.length) console.log('FirmwareUpdates: \u05db\u05dc \u05d4\u05e8\u05d9\u05e9\u05d5\u05de\u05d9\u05dd \u05d4\u05de\u05de\u05ea\u05d9\u05e0\u05d9\u05dd \u05e0\u05e9\u05dc\u05d7\u05d5.');
+    }
+
+    // --- Last known battery percent (for logging) ---
+    let lastBatteryPercent = null;
+    let lastBatteryVoltage = null;
+    let lastRemainingScenarios = null;
+    let lastRemainingVibrations = null;
+    let sessionWasActive = false; // לזיהוי סיום אוטומטי בניתוק BLE
+    let _activeSessionId = null;
+    let _activeSessionStartIso = null;
+    let _sessionEndSent = false;
+    /** true אחרי שירות הלוגים זמין ב-BLE */
+    let _deviceLogsAvailable = false;
+    /** true אחרי סנכron מוצלח מהקושחה — לא שולחים SESSION_START/END חיים */
+    let _preferDeviceLogs = false;
+
+    function extractMacFromDeviceName(name) {
+        // Device name is "Golden life - <MAC>"
+        const prefix = "Golden life - ";
+        if (typeof name !== "string") return "";
+        const idx = name.indexOf(prefix);
+        if (idx === -1) return "";
+        return name.substring(idx + prefix.length).trim();
+    }
+
+    const BLE_DEVICE_PREFIX = 'Golden life - ';
+    const BLE_OPTIONAL_SERVICES = [mainServiceUuid, otaServiceUuid, logServiceUuid];
+    let _bleScanController = null;
+
+    function formatMacPlain_(mac) {
+        var raw = String(mac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        return raw.length === 12 ? raw : (raw || '—');
+    }
+
+    function formatMacDisplay_(mac) {
+        var raw = String(mac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        if (raw.length === 12) {
+            return raw.replace(/(.{2})(?=.)/g, '$1:');
+        }
+        return raw || '—';
+    }
+
+    function isGoldenLifeBleName_(name) {
+        return typeof name === 'string' && name.indexOf('Golden life') !== -1;
+    }
+
+    function stopBleScan_() {
+        if (_bleScanController) {
+            try { _bleScanController.stop(); } catch (e) { /* ignore */ }
+            _bleScanController = null;
+        }
+    }
+
+    function requestBleDeviceFallback_() {
+        return navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: BLE_DEVICE_PREFIX }],
+            optionalServices: BLE_OPTIONAL_SERVICES
+        });
+    }
+
+    function pickBleDevice_() {
+        if (!navigator.bluetooth.requestLEScan) {
+            return requestBleDeviceFallback_();
+        }
+        return new Promise(function (resolve, reject) {
+            var found = new Map();
+            var modal = document.getElementById('blePickerModal');
+            var listEl = document.getElementById('blePickerList');
+            var statusEl = document.getElementById('blePickerStatus');
+            var cancelBtn = document.getElementById('blePickerCancel');
+            if (!modal || !listEl || !statusEl || !cancelBtn) {
+                return requestBleDeviceFallback_().then(resolve, reject);
+            }
+
+            function cleanup() {
+                stopBleScan_();
+                modal.classList.remove('is-open');
+                cancelBtn.onclick = null;
+            }
+
+            function renderList() {
+                listEl.textContent = '';
+                var items = Array.from(found.values());
+                items.sort(function (a, b) { return (b.rssi || -999) - (a.rssi || -999); });
+                if (!items.length) {
+                    var empty = document.createElement('p');
+                    empty.className = 'ble-picker-empty';
+                    empty.textContent = 'מחפש צמידים בקרבת מקום… ודאו שהצמיד דלוק וקרוב לטלפון.';
+                    listEl.appendChild(empty);
+                    return;
+                }
+                items.forEach(function (item) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'ble-picker-item';
+                    btn.dataset.id = item.id;
+                    var title = document.createElement('span');
+                    title.className = 'ble-picker-item__title';
+                    title.textContent = 'צמיד Golden Life';
+                    var mac = document.createElement('span');
+                    mac.className = 'ble-picker-item__mac';
+                    mac.textContent = item.macDisplay;
+                    btn.appendChild(title);
+                    btn.appendChild(mac);
+                    if (item.rssi != null) {
+                        var rssi = document.createElement('span');
+                        rssi.className = 'ble-picker-item__rssi';
+                        rssi.textContent = 'עוצמת אות: ' + item.rssi + ' dBm (גבוה = קרוב יותר)';
+                        btn.appendChild(rssi);
+                    }
+                    btn.onclick = function () {
+                        var entry = found.get(btn.dataset.id);
+                        if (!entry) return;
+                        cleanup();
+                        // Chrome: מכשיר מ-requestLEScan אינו מורשה ל-GATT.connect — צריך requestDevice.
+                        var exactName = (entry.device && entry.device.name) || '';
+                        var reqOpts = { optionalServices: BLE_OPTIONAL_SERVICES };
+                        if (exactName) reqOpts.filters = [{ name: exactName }];
+                        else reqOpts.filters = [{ namePrefix: BLE_DEVICE_PREFIX }];
+                        navigator.bluetooth.requestDevice(reqOpts).then(resolve, function (err) {
+                            console.warn('requestDevice by exact name failed, falling back to prefix:', err);
+                            requestBleDeviceFallback_().then(resolve, reject);
+                        });
+                    };
+                    listEl.appendChild(btn);
+                });
+            }
+
+            cancelBtn.onclick = function () {
+                cleanup();
+                reject(new DOMException('Cancelled', 'AbortError'));
+            };
+
+            modal.classList.add('is-open');
+            statusEl.textContent = 'סורק… בחרו צמיד לפי כתובת MAC';
+            renderList();
+
+            navigator.bluetooth.requestLEScan({
+                filters: [{ namePrefix: 'Golden life' }],
+                keepRepeatedDevices: true
+            }).then(function (controller) {
+                _bleScanController = controller;
+                controller.addEventListener('advertisementreceived', function (event) {
+                    var advName = event.name || (event.device && event.device.name) || '';
+                    if (!isGoldenLifeBleName_(advName) && !isGoldenLifeBleName_(event.device.name || '')) return;
+                    var name = advName || event.device.name || '';
+                    var macRaw = extractMacFromDeviceName(name);
+                    found.set(event.device.id, {
+                        id: event.device.id,
+                        device: event.device,
+                        macDisplay: formatMacDisplay_(macRaw) || name.replace(/^Golden life\s*-\s*/i, '').trim() || name,
+                        rssi: event.rssi
+                    });
+                    renderList();
+                });
+            }).catch(function () {
+                cleanup();
+                requestBleDeviceFallback_().then(resolve, reject);
+            });
+        });
+    }
+
+    function parseFirmwareVersionFromFileName(name) {
+        const m = String(name || "").match(/(?:v|V)?(\d+\.\d+\.\d+)/);
+        return m ? m[1] : "";
+    }
+
+    /** השוואת גרסאות בסגנון 1.0.2 — מחזיר 1 אם a>b, -1 אם a<b, 0 אם שווה / לא ניתן */
+    function versionCompareSemver(a, b) {
+        var pa = String(a || "").replace(/^v/i, "").split(".").map(function (x) { return parseInt(x, 10) || 0; });
+        var pb = String(b || "").replace(/^v/i, "").split(".").map(function (x) { return parseInt(x, 10) || 0; });
+        var n = Math.max(pa.length, pb.length);
+        for (var i = 0; i < n; i++) {
+            var da = pa[i] || 0, db = pb[i] || 0;
+            if (da > db) return 1;
+            if (da < db) return -1;
+        }
+        return 0;
+    }
+
+    function getBatterySnapshotForLog() {
+        return {
+            batteryPercent: lastBatteryPercent != null ? lastBatteryPercent : (parseInt(document.getElementById("batteryPercentageDisplay").textContent, 10) || 0),
+            batteryVoltage: lastBatteryVoltage != null ? Number(lastBatteryVoltage.toFixed(2)) : 0
+        };
+    }
+
+    function postBraceletEvent(mac, event) {
+        if (!mac || !LOG_WEBAPP_URL || !event) return;
+        try {
+            fetch(LOG_WEBAPP_URL, buildLogPostOptions_({ mac: mac, events: [event] }));
+        } catch (e) {
+            console.warn('Failed to post bracelet event:', e);
+        }
+    }
+
+    function buildOtaEvent(eventType, meta) {
+        meta = meta || {};
+        var snap = getBatterySnapshotForLog();
+        var now = Date.now();
+        var durationMs = _otaStartedAt ? (now - _otaStartedAt) : 0;
+        var raw = [
+            'ota_from=' + String(meta.oldVer || _currentFirmwareVersion || ''),
+            'ota_to=' + String(meta.newVer || ''),
+            'fw=' + String(meta.newVer || _currentFirmwareVersion || ''),
+            'ota_file=' + String(meta.fileName || ''),
+            'ota_size=' + String(meta.size || ''),
+            'ota_duration_ms=' + String(durationMs || ''),
+            'batteryVoltage=' + String(snap.batteryVoltage || 0)
+        ].join(',');
+        return {
+            timestamp: new Date().toISOString(),
+            sessionId: 'OTA-' + now,
+            eventType: eventType,
+            source: 'WEB',
+            stopReason: eventType,
+            batteryPercent: snap.batteryPercent,
+            batteryVoltage: snap.batteryVoltage,
+            rawData: raw
+        };
+    }
+
+    function rememberPendingOtaVerification(mac, meta) {
+        if (!mac) return;
+        try {
+            localStorage.setItem('gl_pending_ota_verify_' + mac, JSON.stringify({
+                mac: mac,
+                oldVer: meta.oldVer || '',
+                newVer: meta.newVer || '',
+                fileName: meta.fileName || '',
+                size: meta.size || '',
+                startedAt: _otaStartedAt || Date.now()
+            }));
+        } catch (e) { }
+    }
+
+    var GL_LOCAL_BUILD_TAG = 'v2026-09-17-ota-resilience';
+    /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
+    var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
+    console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
+
+    function otaDismissStorageKey_(mac, targetVersion) {
+        return 'gl_ota_dismiss_' + (mac || 'na') + '_' + String(targetVersion || '');
+    }
+
+    /** רק אחרי OTA מוצלח — לא לפני; כישלון לא חוסם ניסיון חוזר בחיבור הבא */
+    function shouldOfferAutoOta_(mac, targetVersion) {
+        var k = otaDismissStorageKey_(mac, targetVersion);
+        try {
+            var v = sessionStorage.getItem(k);
+            if (v === 'running') {
+                sessionStorage.removeItem(k);
+                return true;
+            }
+            return v !== 'done';
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function markOtaAutoComplete_(mac, targetVersion) {
+        if (!mac || !targetVersion) return;
+        try {
+            sessionStorage.setItem(otaDismissStorageKey_(mac, targetVersion), 'done');
+        } catch (e) { }
+    }
+
+    function clearOtaAutoDismiss_(mac, targetVersion) {
+        if (!targetVersion) return;
+        try {
+            sessionStorage.removeItem(otaDismissStorageKey_(mac, targetVersion));
+        } catch (e) { }
+    }
+
+    function completePendingOtaVerification(mac, installedVersion) {
+        if (!mac || !installedVersion) return;
+        var key = 'gl_pending_ota_verify_' + mac;
+        try {
+            var raw = localStorage.getItem(key);
+            if (!raw) return;
+            var meta = JSON.parse(raw);
+            if (meta && meta.newVer && versionCompareSemver(installedVersion, meta.newVer) >= 0) {
+                postBraceletEvent(mac, buildOtaEvent('OTA_VERIFIED_AFTER_RECONNECT', {
+                    oldVer: meta.oldVer,
+                    newVer: installedVersion,
+                    fileName: meta.fileName,
+                    size: meta.size
+                }));
+                markOtaAutoComplete_(mac, meta.newVer);
+                localStorage.removeItem(key);
+            }
+        } catch (e) {
+            console.warn('OTA verification completion failed:', e);
+        }
+    }
+
+    function isLikelyOtaRebootError(error) {
+        var msg = String((error && (error.message || error.name)) || error || '');
+        return (_otaEndCommandSent || _otaExpectedReboot) && /GATT|disconnected|NetworkError|unknown reason/i.test(msg);
+    }
+
+    function getSessionParamSnapshot_() {
+        const vibratePowerVal = parseInt(document.getElementById("vibratePower").value, 10) || 0;
+        const pulseIntervalVal = parseInt(document.getElementById("pulseInterval").value, 10) || 0;
+        const pulseNumberVal = parseInt(document.getElementById("pulseNumber").value, 10) || 0;
+        const vibrationDurationVal = parseInt(document.getElementById("vibrationDuration").value, 10) || 0;
+        const pauseMinutesVal = parseInt(document.getElementById("postDelay").value, 10) || 0;
+        const repeatsVal = parseInt(document.getElementById("repeatCount").value, 10) || 0;
+        const batteryPercentVal = lastBatteryPercent != null
+            ? lastBatteryPercent
+            : parseInt(document.getElementById("batteryPercentageDisplay").textContent, 10) || 0;
+        const batteryVoltageVal = lastBatteryVoltage != null
+            ? Number(lastBatteryVoltage.toFixed(2))
+            : 0;
+        var _fwLog = (_currentFirmwareVersion && String(_currentFirmwareVersion).toLowerCase() !== 'unknown')
+            ? ('fw=' + String(_currentFirmwareVersion).trim())
+            : '';
+        return {
+            vibratePowerVal, pulseIntervalVal, pulseNumberVal, vibrationDurationVal,
+            pauseMinutesVal, repeatsVal, batteryPercentVal, batteryVoltageVal, _fwLog
+        };
+    }
+
+    function beginWebSession_() {
+        _activeSessionId = Date.now().toString();
+        _activeSessionStartIso = new Date().toISOString();
+        _sessionEndSent = false;
+    }
+
+    function buildSessionStartEvent() {
+        if (!_activeSessionId) beginWebSession_();
+        const p = getSessionParamSnapshot_();
+        return {
+            timestamp: _activeSessionStartIso,
+            startTime: _activeSessionStartIso,
+            sessionId: _activeSessionId,
+            eventType: "SESSION_START",
+            source: "WEB",
+            vibratePower: p.vibratePowerVal,
+            pulseInterval: p.pulseIntervalVal,
+            pulseNumber: p.pulseNumberVal,
+            vibrationDuration: p.vibrationDurationVal,
+            pauseMinutes: p.pauseMinutesVal,
+            repeats: p.repeatsVal,
+            stopReason: "",
+            batteryPercent: p.batteryPercentVal,
+            batteryVoltage: p.batteryVoltageVal,
+            rawData: p._fwLog
+        };
+    }
+
+    function buildSessionEndEvent(stopReason) {
+        const timestamp = new Date().toISOString();
+        if (!_activeSessionId) _activeSessionId = Date.now().toString();
+        const p = getSessionParamSnapshot_();
+        var ev = {
+            timestamp,
+            startTime: _activeSessionStartIso || timestamp,
+            sessionId: _activeSessionId,
+            eventType: "SESSION_END",
+            source: "WEB",
+            vibratePower: p.vibratePowerVal,
+            pulseInterval: p.pulseIntervalVal,
+            pulseNumber: p.pulseNumberVal,
+            vibrationDuration: p.vibrationDurationVal,
+            pauseMinutes: p.pauseMinutesVal,
+            repeats: p.repeatsVal,
+            stopReason,
+            batteryPercent: p.batteryPercentVal,
+            batteryVoltage: p.batteryVoltageVal,
+            rawData: p._fwLog
+        };
+        if (stopReason === "MANUAL_STOP" || stopReason === "AUTO_STOP") {
+            if (lastRemainingScenarios !== null && lastRemainingScenarios !== undefined) ev.repeatsRemaining = lastRemainingScenarios;
+            if (lastRemainingVibrations !== null && lastRemainingVibrations !== undefined && p.pulseNumberVal > 0) {
+                ev.pulsesCompleted = Math.max(0, p.pulseNumberVal - lastRemainingVibrations);
+                ev.remainingVibrations = lastRemainingVibrations;
+            }
+        }
+        return ev;
+    }
+
+    async function postEventsToServer(events) {
+        if (!LOG_WEBAPP_URL || !device || !events || !events.length) return false;
+        var mac = extractMacFromDeviceName(device.name || "");
+        var payload = { mac: mac, events: events };
+        try {
+            if (!useJsonCorsPost_()) {
+                await fetch(LOG_WEBAPP_URL, buildLogPostOptions_(payload));
+                console.log("postEventsToServer (no-cors, file):", events.length, "events");
+                return true;
+            }
+            var resp = await fetch(LOG_WEBAPP_URL, buildLogPostOptions_(payload));
+            var data = await resp.json().catch(function () { return null; });
+            return !!(data && data.ok);
+        } catch (e) {
+            console.warn("postEventsToServer failed:", e);
+            return false;
+        }
+    }
+
+    async function sendEventsToServer(events) {
+        await postEventsToServer(events);
+    }
+
+    async function sendTimeSyncToDevice() {
+        if (!logControlChar) return;
+        const nowMs = Date.now();
+        const buf = new Uint8Array(9);
+        buf[0] = "T".charCodeAt(0);
+        for (let i = 0; i < 8; i++) buf[1 + i] = (nowMs >> (8 * i)) & 0xff;
+        await logControlChar.writeValue(buf);
+    }
+
+    function lastCloudSyncLocalKey_(mac) {
+        return 'gl_cloud_log_sync_' + String(mac || '').trim();
+    }
+
+    function readLastCloudSyncLocal_(mac) {
+        try {
+            var raw = localStorage.getItem(lastCloudSyncLocalKey_(mac));
+            if (!raw) return 0;
+            var n = parseInt(raw, 10);
+            return isFinite(n) && n > 1e12 ? n : 0;
+        } catch (e) { return 0; }
+    }
+
+    function saveLastCloudSyncLocal_(mac, ms) {
+        try {
+            localStorage.setItem(lastCloudSyncLocalKey_(mac), String(ms));
+        } catch (e) { }
+    }
+
+    async function writeLastCloudSyncToDevice_(unixMs) {
+        if (!logControlChar) return;
+        var ms = Number(unixMs);
+        if (!isFinite(ms) || ms < 1e12) return;
+        var buf = new Uint8Array(9);
+        buf[0] = 'L'.charCodeAt(0);
+        for (var i = 0; i < 8; i++) buf[1 + i] = (ms >> (8 * i)) & 0xff;
+        await logControlChar.writeValue(buf);
+    }
+
+    /** קריאה שקטה מ-EEPROM הקושחה (פקודה G) — ללא UI */
+    async function readLastCloudSyncFromDevice_() {
+        if (!logControlChar || !logDataChar) return null;
+        try {
+            await runGattOp(async function () {
+                var encoder = new TextEncoder();
+                await logControlChar.writeValue(encoder.encode('G'));
+            });
+            var value = await logDataChar.readValue();
+            var text = decodeText(value);
+            var m = String(text || '').match(/SYNC_LAST,(\d+)/);
+            if (m) return parseInt(m[1], 10);
+        } catch (e) {
+            console.debug('readLastCloudSyncFromDevice_:', e);
+        }
+        return null;
+    }
+
+    /** בדיקה שקטה — האם נדרש סנכron (48 שעות או מעולם לא) */
+    async function shouldSyncLogsFromDevice_() {
+        if (!logControlChar || !logDataChar) return false;
+        var mac = extractMacFromDeviceName(device ? device.name || '' : '');
+        var lastMs = await readLastCloudSyncFromDevice_();
+        if (lastMs == null || !isFinite(lastMs) || lastMs < 1e12) {
+            lastMs = readLastCloudSyncLocal_(mac);
+        }
+        if (!lastMs) {
+            console.debug('Log sync check: no prior sync — will sync.');
+            return true;
+        }
+        var ageMs = Date.now() - lastMs;
+        if (ageMs < LOG_CLOUD_SYNC_MIN_MS) {
+            console.debug('Log sync check: skipped (last ' + Math.round(ageMs / 3600000) + 'h ago, EEPROM/local).');
+            return false;
+        }
+        console.debug('Log sync check: due (' + Math.round(ageMs / 3600000) + 'h since last).');
+        return true;
+    }
+
+    async function syncLogsFromDeviceIfNeeded_() {
+        try {
+            var needs = await shouldSyncLogsFromDevice_();
+            if (!needs) return false;
+        } catch (chkErr) {
+            console.debug('Log sync check failed, proceeding:', chkErr);
+        }
+        await syncLogsFromDevice();
+        return true;
+    }
+
+    async function sendSessionStartToServer() {
+        try {
+            if (_preferDeviceLogs) {
+                console.log('SESSION_START skipped — device log sync is source of truth.');
+                return;
+            }
+            if (!LOG_WEBAPP_URL || !device) return;
+            await sendEventsToServer([buildSessionStartEvent()]);
+            console.log("SESSION_START sent, id:", _activeSessionId);
+        } catch (err) {
+            console.error("Failed to send SESSION_START:", err);
+        }
+    }
+
+    async function sendSessionLogToServer(stopReason) {
+        try {
+            if (_preferDeviceLogs) {
+                console.log('SESSION_END skipped — device log sync is source of truth.');
+                _sessionEndSent = true;
+                sessionWasActive = false;
+                return;
+            }
+            if (!LOG_WEBAPP_URL || !device) return;
+            if (_sessionEndSent) return;
+            const event = buildSessionEndEvent(stopReason);
+            await sendEventsToServer([event]);
+            _sessionEndSent = true;
+            sessionWasActive = false;
+            console.log("SESSION_END sent:", stopReason, event.sessionId);
+        } catch (err) {
+            console.error("Failed to send session log to server:", err);
+        }
+    }
+
+    function markDeviceSessionEndReceived_() {
+        _sessionEndSent = true;
+        sessionWasActive = false;
+    }
+
+    function decodeText(value) {
+        if (!value) return "";
+        if (value instanceof ArrayBuffer) {
+            return new TextDecoder("utf-8").decode(value);
+        }
+        if (value.buffer && value.buffer instanceof ArrayBuffer) {
+            return new TextDecoder("utf-8").decode(value.buffer);
+        }
+        return String(value);
+    }
+
+    async function syncLogsFromDevice() {
+        try {
+            if (!logControlChar || !logDataChar || !device || !device.gatt) {
+                console.log("Log sync skipped: device or log characteristics not ready.");
+                return;
+            }
+            if (!assertGlLogParserLoaded_()) {
+                return;
+            }
+
+            isSyncingLogs = true;
+            const startButton = document.getElementById("startButton");
+            if (startButton) {
+                startButton.disabled = true;
+                startButton.textContent = "מסנכרן לוגים...";
+            }
+            console.log("🔄 סנכרון לוגים מהצמיד - אנא המתן...");
+
+            let summaryCount = 0;
+            let allUploadOk = true;
+
+            await runGattOp(async function () {
+                await sendTimeSyncToDevice();
+                const encoder = new TextEncoder();
+                await logControlChar.writeValue(encoder.encode("S"));
+                window.GlLogParser.resetClock();
+
+                let bufferText = "";
+                const allDeviceLines = [];
+
+                async function uploadParsedEvents_(events) {
+                    if (!events.length) return;
+                    var filtered = window.GlLogParser.filterEventsForUpload_(events);
+                    if (filtered.skipped > 0) {
+                        console.log("סונן " + filtered.skipped + " אירועים (לא מלא / לא תקלה) — לא נשלחו לשרת");
+                    }
+                    events = filtered.events;
+                    if (!events.length) return;
+                    summaryCount += events.filter(function (e) {
+                        var et = String(e.eventType || "").toUpperCase();
+                        return et === "SESSION_SUMMARY" || et === "SERIES_SUMMARY";
+                    }).length;
+                    if (events.some(function (e) { return String(e.eventType || '').toUpperCase() === 'SESSION_END'; })) {
+                        markDeviceSessionEndReceived_();
+                    }
+                    const ok = await postEventsToServer(events);
+                    if (!ok) allUploadOk = false;
+                    console.log("Synced", events.length, "events, ok=", ok);
+                }
+
+                while (true) {
+                    const value = await logDataChar.readValue();
+                    const chunk = decodeText(value);
+                    if (!chunk || !chunk.length) break;
+                    bufferText += chunk;
+                    let newlineIndex;
+                    while ((newlineIndex = bufferText.indexOf("\n")) !== -1) {
+                        const line = bufferText.slice(0, newlineIndex).trim();
+                        bufferText = bufferText.slice(newlineIndex + 1);
+                        if (line) allDeviceLines.push(line);
+                    }
+                }
+                if (bufferText.trim()) allDeviceLines.push(bufferText.trim());
+
+                primeWallUsBaseFromLines_(allDeviceLines);
+                let allParsedEvents = allDeviceLines.map(lineToLogEvent_).filter(Boolean);
+                if (window.GlLogParser.enrichMillisTimestampsInBatch_) {
+                    allParsedEvents = window.GlLogParser.enrichMillisTimestampsInBatch_(allParsedEvents);
+                }
+                for (let bi = 0; bi < allParsedEvents.length; bi += 50) {
+                    await uploadParsedEvents_(allParsedEvents.slice(bi, bi + 50));
+                }
+                if (allUploadOk) {
+                    await logControlChar.writeValue(encoder.encode("C"));
+                    var syncMac = extractMacFromDeviceName(device ? device.name || '' : '');
+                    var syncNow = Date.now();
+                    try {
+                        await writeLastCloudSyncToDevice_(syncNow);
+                    } catch (stampErr) {
+                        console.debug('writeLastCloudSyncToDevice_ failed:', stampErr);
+                    }
+                    if (syncMac) saveLastCloudSyncLocal_(syncMac, syncNow);
+                    console.log("Device logs cleared after successful upload.");
+                } else {
+                    console.warn("Upload incomplete — device logs kept for next sync.");
+                }
+            });
+            if (allUploadOk && _deviceLogsAvailable) _preferDeviceLogs = true;
+            if (summaryCount > 0) {
+                console.log("סונכרנו " + summaryCount + " סיכומי מחזורים מהצמיד.");
+            }
+        } catch (err) {
+            console.error("Failed to sync logs from device:", err);
+        } finally {
+            isSyncingLogs = false;
+            const startButton = document.getElementById("startButton");
+            if (startButton) {
+                startButton.disabled = false;
+                startButton.textContent = "התחל";
+            }
+            console.log("✅ סנכרון לוגים הסתיים");
+        }
+    }
+
+    const LOG_PARSER_BUILD_ = "2026-05-20-us6";
+    const EXPECTED_PARSER_BUILD_ = "2026-05-20-us6";
+
+    function assertGlLogParserLoaded_() {
+        if (!window.GlLogParser || window.GlLogParser.BUILD !== EXPECTED_PARSER_BUILD_) {
+            const got = (window.GlLogParser && window.GlLogParser.BUILD) || window.__GL_LOG_PARSER_BUILD || "חסר";
+            const msg = "מפענח לוגים לא נטען (צפוי " + EXPECTED_PARSER_BUILD_ + ", התקבל " + got + "). רענון Ctrl+Shift+R (קובץ יחיד — אם נשאר, נקה מטמון דפדפן).";
+            console.error(msg);
+            const sm = document.getElementById("statusMessage");
+            if (sm) {
+                sm.textContent = msg;
+                sm.style.color = "#b45309";
+                sm.style.display = "block";
+            }
+            return false;
+        }
+        return true;
+    }
+
+    function lineToLogEvent_(line) {
+        return window.GlLogParser.lineToLogEvent_(line);
+    }
+
+    function primeWallUsBaseFromLines_(lines) {
+        return window.GlLogParser.primeWallUsBaseFromLines_(lines);
+    }
+
+    console.log("Golden Life user page build:", LOG_PARSER_BUILD_);
+
+    // --- Battery Voltage Constants (Adjust these based on your specific battery) ---
+    const BATTERY_MAX_VOLTAGE = 4.2; // Full charge voltage for a 3.7V LiPo
+    const BATTERY_MIN_VOLTAGE = 3.3; // Runtime cutoff used by the firmware for logging/tests
+
+    // This function is still useful for general checks, but ondisconnected is more immediate.
+    function checkBLEConnection() {
+        if (!device || !device.gatt.connected) {
+            console.log("BLE disconnected, trying to reconnect (from interval check)...");
+            // Call the disconnection handling directly
+            handleBleDisconnected();
+        }
+    }
+
+    // New function to handle BLE disconnection events
+    function handleBleDisconnected(event) {
+        console.log('BLE device disconnected!', event ? event.target.name : '');
+
+        // אם OTA בתהליך / ממתין לריסט — לא מאפסים עדיין
+        if (bleDropIgnoredDuringOta_()) {
+            console.warn('BLE disconnected during/after OTA — device rebooting.');
+            document.getElementById('statusMessage').textContent =
+                'OTA: הצמיד מתאתחל — המתינו ואז התחברו מחדש.';
+            if (_otaAwaitingReboot || _otaExpectedReboot) {
+                scheduleOtaRebootGrace_(120000);
+            }
+            return;
+        }
+        if (_bleConnecting) {
+            console.warn('BLE disconnected during connect — connectBLE will abort.');
+            return;
+        }
+
+        // שליחת לוג אוטומטית אם הסשן היה פעיל (הצמיד נכנס לשינה אחרי סיום)
+        if (sessionWasActive && device && !_sessionEndSent) {
+            console.log("Session was active when disconnected - sending AUTO_STOP log");
+            sendSessionLogToServer("AUTO_STOP");
+        }
+
+        document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
+
+        document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
+        document.getElementById('errorMessage').style.display = 'block';
+
+        // Hide control panel, show connect button
+        document.getElementById('controlPanel').style.display = 'none';
+
+        document.getElementById('connectButton').style.display = 'block'; // הצג את כפתור ההתחברות מחדש
+        var connOtaBtn = document.getElementById('connectOtaButton');
+        if (connOtaBtn) {
+            connOtaBtn.style.display = 'block';
+            connOtaBtn.disabled = false;
+        }
+        document.getElementById('disconnectButton').style.display = 'none';
+        document.getElementById('disconnectButton').disabled = false;
+        document.getElementById('disconnectButton').title = '';
+
+        // Clear the periodic connection check interval if it's running
+        clearInterval(connectionInterval);
+        connectionInterval = null; // Reset to null after clearing
+
+        // Reset device and server objects to null to ensure a fresh connection
+        _isInventoryMode = false;
+        _activeSessionId = null;
+        _activeSessionStartIso = null;
+        _sessionEndSent = false;
+        device = null;
+        server = null;
+        service = null;
+        charStart = null;
+        charStop = null;
+        charVibratePower = null;
+        charPulseInterval = null;
+        charPulseNumber = null;
+        charVibrationDuration = null;
+        charVibrationStatus = null;
+
+        // Reset OTA related characteristics as well
+        otaService = null;
+        otaControlChar = null;
+        otaDataChar = null;
+        otaStatusChar = null;
+
+        document.getElementById('startOtaButton').disabled = true; // Disable OTA button on disconnect
+        document.getElementById('otaProgressBarContainer').style.display = 'none'; // Hide container
+        document.getElementById('otaProgressBar').style.width = '0%';
+        document.getElementById('otaProgressBar').textContent = '0%';
+        document.getElementById('otaStatusMessage').textContent = '';
+
+        // Reset battery display on disconnect
+        document.getElementById('batteryPercentageDisplay').textContent = '--';
+        var voltageDisplay = document.getElementById('batteryVoltageDisplay'); if (voltageDisplay) voltageDisplay.textContent = '--';
+        lastBatteryVoltage = null;
+        lastBatteryPercent = null;
+        var cgEl = document.getElementById('customerGreeting'); if (cgEl) cgEl.classList.remove('is-visible');
+        document.getElementById('batteryIcon').className = 'fas fa-battery-empty';
+        document.getElementById('batteryIcon').style.color = '#666';
+        setFirmwareVersionBanner(false);
+    }
+
+    async function checkAndOfferAutoOtaOnConnect_() {
+        var result = { didOta: false, fwData: null };
+        if (!service || !device) return result;
+        try {
+            const _vChar = await service.getCharacteristic(CHAR_UUID_VERSION);
+            const _vVal = await _vChar.readValue();
+            _currentFirmwareVersion = new TextDecoder().decode(_vVal).trim();
+            console.log('Bracelet firmware version:', _currentFirmwareVersion);
+        } catch (readErr) {
+            console.warn('Firmware version read failed:', readErr);
+            return result;
+        }
+        if (!LOG_WEBAPP_URL || !_currentFirmwareVersion || _currentFirmwareVersion.toLowerCase() === 'unknown') {
+            setFirmwareVersionBanner(true, _currentFirmwareVersion || '\u2014', _currentFirmwareVersion || '');
+            return result;
+        }
+        var _macForFwCheck = extractMacFromDeviceName(device.name || '');
+        if (!_macForFwCheck) return result;
+        try {
+            const _fwResp = await fetchServerGetJson_('action=checkFirmware&version=' +
+                encodeURIComponent(_currentFirmwareVersion) + '&mac=' + encodeURIComponent(_macForFwCheck));
+            const _fwData = _fwResp;
+            result.fwData = _fwData;
+            if (_fwData && _fwData.updateOnlyMode) _isInventoryMode = true;
+            var _bleBanner = _currentFirmwareVersion || '';
+            var _effectiveBanner = _bleBanner;
+            if (_fwData && _fwData.ok) {
+                var _sheetVer = String(_fwData.lastSuccessfulNewVersion || '').trim();
+                // רק אם הגיליון גבוה מ-BLE (BLE = מקור אמת; מונע הצגת גרסה ישנה בצריבה ידנית)
+                if (_sheetVer && versionCompareSemver(_sheetVer, _bleBanner) > 0) _effectiveBanner = _sheetVer;
+            }
+            setFirmwareVersionBanner(true, _effectiveBanner || '\u2014', _bleBanner);
+            if (_macForFwCheck && _currentFirmwareVersion) {
+                fireAndForgetServerGet_('action=recordFirmwareInstalled&mac=' + encodeURIComponent(_macForFwCheck) +
+                    '&version=' + encodeURIComponent(_currentFirmwareVersion));
+                completePendingOtaVerification(_macForFwCheck, _currentFirmwareVersion);
+            }
+            var _offerOta = _fwData && _fwData.ok && _fwData.downloadUrl && _macForFwCheck &&
+                (_fwData.otaAllowed === true || _fwData.needsOta === true);
+            if (!_offerOta) {
+                if (_fwData && _fwData.ok && versionCompareSemver(_currentFirmwareVersion, _fwData.latestVersion || '') >= 0) {
+                    markOtaAutoComplete_(_macForFwCheck, String(_fwData.latestVersion || ''));
+                    document.getElementById('statusMessage').textContent =
+                        'מחובר — גרסה ' + _currentFirmwareVersion + '. ניתן להפעיל תרחישים (התחל).';
+                }
+                return result;
+            }
+            var _otaTargetVer = String(_fwData.latestVersion || '');
+            if (!shouldOfferAutoOta_(_macForFwCheck, _otaTargetVer)) return result;
+            var _batteryKnownLow = (lastBatteryPercent != null && lastBatteryPercent < 40) ||
+                (lastBatteryVoltage != null && lastBatteryVoltage > 0 && lastBatteryVoltage < 3.75);
+            if (_batteryKnownLow) {
+                document.getElementById('statusMessage').textContent = 'נמצא עדכון קושחה ל-' + _otaTargetVer +
+                    ', אך הסוללה נמוכה. טען את הצמיד — אחרי טעינה התחברו שוב (ינסה OTA שוב).';
+                return result;
+            }
+            document.getElementById('statusMessage').textContent = (_isInventoryMode || _fwData.updateOnlyMode)
+                ? 'צמיד לא רשום: נמצא עדכון ל-' + _otaTargetVer + '. מבצע OTA אוטומטי, נא לא לסגור את הדף.'
+                : 'מעדכן קושחה ל-' + _otaTargetVer + ' — אין הפעלת תרחישים עד סיום וחיבור מחדש.';
+            await runAutomaticOTA(_fwData.downloadUrl, _otaTargetVer, _macForFwCheck);
+            result.didOta = true;
+        } catch (fwErr) {
+            console.warn('Auto OTA check failed:', fwErr);
+        }
+        return result;
+    }
+
+    // פונקציה להתחבר ל-BLE
+    // otaOnly=true — דילוג על בדיקת רישום, מצב OTA בלבד
+    async function connectBLE(otaOnly) {
+        _bleConnecting = true;
+        // חיבור חדש — סיום סשן OTA קודם (grace / נעילה) כדי לא לחסום UI
+        if (_otaAwaitingReboot || _otaInProgress || _otaRebootGraceTimer) {
+            finishOtaSession_({ resetUi: false });
+        }
+        try {
+            if (!navigator.bluetooth || !isSecureBleContext_()) {
+                document.getElementById('errorMessage').innerHTML =
+                    'Web Bluetooth לא זמין. פתחו את הקובץ המקומי ב-Chrome דרך <strong>open-local.bat</strong> ' +
+                    '(file:///…/Goldenlife.html). שרת מקומי מיועד רק ל-Goldenlife_Lab.';
+                document.getElementById('errorMessage').style.display = 'block';
+                return;
+            }
+            // Reset UI state before attempting connection
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('statusMessage').textContent = "מתחבר...";
+
+            device = await pickBleDevice_();
+
+            // Add the disconnection event listener immediately after getting the device
+            device.addEventListener('gattserverdisconnected', handleBleDisconnected);
+
+            // ---- בדיקת רישום MAC לפני חיבור ----
+            var _preMac = extractMacFromDeviceName(device.name || '');
+            if (otaOnly) {
+                // כפתור "עדכון קושחה בלבד" — דלג על בדיקת רישום
+                _isInventoryMode = true;
+                document.getElementById('errorMessage').innerHTML =
+                    '<i class="fas fa-microchip"></i> \u05de\u05d7\u05d5\u05d1\u05e8 \u05dc\u05e6\u05d5\u05e8\u05da \u05e2\u05d3\u05db\u05d5\u05df \u05e7\u05d5\u05e9\u05d7\u05d4 OTA \u05d1\u05dc\u05d1\u05d3.';
+                document.getElementById('errorMessage').style.color = '#0d9488';
+                document.getElementById('errorMessage').style.display = 'block';
+            } else if (_preMac && LOG_WEBAPP_URL) {
+                try {
+                    document.getElementById('statusMessage').textContent = '\u05d1\u05d5\u05d3\u05e7 \u05e8\u05d9\u05e9\u05d5\u05dd...';
+                    var _preData = await checkMacRegistrationQuick_(_preMac);
+                    if (_preData && _preData.ok && !_preData.registered) {
+                        // לא רשום — מחבר במצב OTA בלבד
+                        _isInventoryMode = true;
+                        var _regBase2 = LOG_WEBAPP_URL.split('?')[0];
+                        var _regNote = _preData.inInventory
+                            ? '\u26a0 \u05e6\u05de\u05d9\u05d3 \u05de\u05dc\u05d0\u05d9 \u2014 \u05de\u05d7\u05d5\u05d1\u05e8 \u05dc\u05e6\u05d5\u05e8\u05da OTA \u05d1\u05dc\u05d1\u05d3.'
+                            : '\u26a0 \u05e6\u05de\u05d9\u05d3 \u05dc\u05d0 \u05e8\u05e9\u05d5\u05dd \u2014 \u05de\u05d7\u05d5\u05d1\u05e8 \u05dc\u05e6\u05d5\u05e8\u05da \u05e2\u05d3\u05db\u05d5\u05df \u05e7\u05d5\u05e9\u05d7\u05d4 OTA \u05d1\u05dc\u05d1\u05d3. \u05d4\u05e4\u05e2\u05dc\u05d4 \u05e8\u05d2\u05d9\u05dc\u05d4 \u05d7\u05e1\u05d5\u05de\u05d4 \u05e2\u05d3 \u05e8\u05d9\u05e9\u05d5\u05dd. <a href="' + _regBase2 + '?page=register&mac=' + encodeURIComponent(_preMac) + '" target="_blank" style="color:#007bff;font-weight:bold">\u05e8\u05d9\u05e9\u05d5\u05dd \u05e6\u05de\u05d9\u05d3</a>';
+                        document.getElementById('errorMessage').innerHTML = _regNote;
+                        document.getElementById('errorMessage').style.display = 'block';
+                    } else if (_preData && _preData.ok && _preData.registered) {
+                        _isInventoryMode = false;
+                        document.getElementById('errorMessage').style.display = 'none';
+                    }
+                } catch (_preErr) {
+                    console.warn('Pre-connect MAC check failed, proceeding anyway:', _preErr);
+                    document.getElementById('statusMessage').textContent =
+                        'בדיקת רישום לא הצליחה (רשת/JSONP) — ממשיכים בחיבור. אם הצמיד רשום, אפשר להפעיל תרחישים.';
+                }
+            }
+            // ---- סוף בדיקה מוקדמת ----
+            server = await device.gatt.connect();
+
+            // Get main service and characteristics
+            service = await server.getPrimaryService(mainServiceUuid);
+
+            // גילוי מאפיינים בבת אחת — round-trip אחד במקום 6 (מקצר התחברות)
+            await discoverCharsBatch_(service, [
+                { uuid: charUuidVibratePower, name: 'Vibrate Power', set: (c) => charVibratePower = c },
+                { uuid: charUuidPulseInterval, name: 'Pulse Interval', set: (c) => charPulseInterval = c },
+                { uuid: charUuidPulseNumber, name: 'Pulse Number', set: (c) => charPulseNumber = c },
+                { uuid: charUuidVibrationDuration, name: 'Vibration Duration', set: (c) => charVibrationDuration = c },
+                { uuid: charUuidStartStop, name: 'Start/Stop', set: (c) => { charStart = c; charStop = c } },
+                { uuid: charUuidVibrationStatus, name: 'Vibration Status', set: (c) => charVibrationStatus = c },
+            ]);
+
+            // Get OTA Service and Characteristics (now using lowercase UUID constants)
+            otaService = await server.getPrimaryService(otaServiceUuid);
+            await discoverCharsBatch_(otaService, [
+                { uuid: otaControlCharUuid, name: 'OTA Control', set: (c) => otaControlChar = c },
+                { uuid: otaDataCharUuid, name: 'OTA Data', set: (c) => otaDataChar = c },
+                { uuid: otaStatusCharUuid, name: 'OTA Status', set: (c) => otaStatusChar = c },
+            ]);
+
+            // Get Log Service and Characteristics (for syncing device logs)
+            try {
+                const logService = await server.getPrimaryService(logServiceUuid);
+                logControlChar = await logService.getCharacteristic(logControlCharUuid);
+                logDataChar = await logService.getCharacteristic(logDataCharUuid);
+                _deviceLogsAvailable = !!(logControlChar && logDataChar);
+                _preferDeviceLogs = false;
+                console.log("Log service characteristics retrieved.");
+            } catch (e) {
+                console.warn("Log service not available on device:", e);
+                logControlChar = null;
+                logDataChar = null;
+                _deviceLogsAvailable = false;
+                _preferDeviceLogs = false;
+            }
+
+            // עכשיו שים כאן את הטעינה של פרמטרים
+            await loadScenarioParams();
+            await loadSettingsFromBLE(); // This was missing, good to have it here
+            await startNotifications();
+
+            // Show control panel and update button visibility
+            document.getElementById('connectButton').style.display = 'none';
+            document.getElementById('disconnectButton').style.display = 'block';
+            if (_isInventoryMode) {
+                // מצב מלאי — הצג רק קטע OTA, הסתר את לוח הבקרה הרגיל
+                document.getElementById('controlPanel').style.display = 'block';
+                var _invPanelEls = ['startButton', 'stopButton', 'vibratePower', 'pulseInterval', 'pulseNumber',
+                    'vibrationDuration', 'batteryPercentageDisplay', 'remainingScenariosDisplay', 'totalVibrations',
+                    'batteryIcon', 'customerGreeting'];
+                _invPanelEls.forEach(function (id) {
+                    var _el = document.getElementById(id);
+                    if (_el) {
+                        var _wrap = _el.closest ? _el.closest('label, h3') : null;
+                        _el.style.display = 'none';
+                        if (_wrap) _wrap.style.display = 'none';
+                    }
+                });
+                // הסתר כפתורים מחוץ ל-OTA
+                ['startButton', 'stopButton'].forEach(function (id) {
+                    var el = document.getElementById(id); if (el) el.style.display = 'none';
+                });
+                document.getElementById('statusMessage').textContent =
+                    '\u05e6\u05de\u05d9\u05d3 \u05de\u05dc\u05d0\u05d9 / \u05dc\u05d0 \u05e8\u05e9\u05d5\u05dd \u2014 \u05de\u05d7\u05d5\u05d1\u05e8 \u05dc\u05e6\u05d5\u05e8\u05da \u05e2\u05d3\u05db\u05d5\u05df \u05e7\u05d5\u05e9\u05d7\u05d4 OTA \u05d1\u05dc\u05d1\u05d3';
+                var _otaBarWrap = document.getElementById('otaProgressBarContainer');
+                if (_otaBarWrap) _otaBarWrap.style.display = 'block';
+                var _otaMsg = document.getElementById('otaStatusMessage');
+                if (_otaMsg) _otaMsg.textContent = '\u05d1\u05d5\u05d3\u05e7 \u05d2\u05e8\u05e1\u05d4 \u05d6\u05de\u05d9\u05e0\u05d4 \u05dc\u05e2\u05d3\u05db\u05d5\u05df \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9...';
+                // פתח אוטומטית את אפשרויות מתקדמות כדי לגשת ל-OTA
+                var _advSec = document.getElementById('advancedOptions');
+                if (_advSec) _advSec.style.display = 'block';
+            } else {
+                document.getElementById('controlPanel').style.display = 'block';
+                document.getElementById('statusMessage').textContent = 'מחובר לצמיד · Golden life - ' + (formatMacPlain_(extractMacFromDeviceName(device.name || '')) || '—');
+                // NMPT: טעינת מצב יחיד/זוגי מהשרת לפי ה-MAC המחובר
+                loadUserDeviceMode(extractMacFromDeviceName(device.name || ''));
+            }
+            setFirmwareVersionBanner(true, '\u05de\u05d6\u05d4\u05d4 \u05d2\u05e8\u05e1\u05d4...', '');
+            // הצג שלום ללקוח הרשום
+            (async function showCustomerGreeting() {
+                try {
+                    var _greetMac = extractMacFromDeviceName(device.name || '');
+                    if (!_greetMac || !LOG_WEBAPP_URL) return;
+                    var _gData = await fetchServerGetJson_('action=checkMac&mac=' + encodeURIComponent(_greetMac));
+                    var _gEl = document.getElementById('customerGreeting');
+                    if (!_gEl) return;
+                    if (_gData && _gData.ok && _gData.registered && _gData.userName) {
+                        _gEl.innerHTML = '<i class="fas fa-user-check"></i> \u05e9\u05dc\u05d5\u05dd <strong>' + _gData.userName + '</strong>!';
+                        _gEl.classList.add('is-visible');
+                    } else { _gEl.classList.remove('is-visible'); }
+                } catch (_ge) { var _gEl2 = document.getElementById('customerGreeting'); if (_gEl2) _gEl2.classList.remove('is-visible'); }
+            })();
+            document.getElementById('errorMessage').style.display = 'none';
+
+            // Start the periodic connection check if it's not already running
+            if (!connectionInterval) {
+                connectionInterval = setInterval(checkBLEConnection, 30000);
+            }
+
+            // Enable OTA button if file is selected and connection is successful
+            const firmwareFile = document.getElementById('firmwareFile');
+            if (firmwareFile.files.length > 0) {
+                document.getElementById('startOtaButton').disabled = false;
+            }
+
+            await checkMacAndShowRegistration();
+            flushPendingFirmwareLogs().catch(function () { });
+
+            var _otaConnect = await checkAndOfferAutoOtaOnConnect_();
+            if (_otaConnect.didOta) return;
+
+            await syncLogsFromDeviceIfNeeded_();
+
+        } catch (error) {
+            if (error.name === 'NotFoundError' || (error.message && error.message.indexOf('cancelled') !== -1)) {
+                console.log('Device selection cancelled by user.');
+                document.getElementById('errorMessage').textContent = "בחירת המכשיר בוטלה. אנא נסה שוב.";
+            } else {
+                console.error('BLE connection failed:', error);
+                document.getElementById('errorMessage').textContent = `חיבור BLE נכשל: ${error.message}`;
+            }
+            document.getElementById('errorMessage').style.display = 'block';
+            document.getElementById('statusMessage').textContent = "התחברות נכשלה.";
+
+            // Ensure UI is reset to disconnected state on failure
+            document.getElementById('controlPanel').style.display = 'none';
+            document.getElementById('connectButton').style.display = 'block';
+            document.getElementById('disconnectButton').style.display = 'none';
+            clearInterval(connectionInterval);
+            connectionInterval = null;
+            document.getElementById('startOtaButton').disabled = true; // Disable OTA button on connect failure
+        } finally {
+            _bleConnecting = false;
+        }
+    }
+
+
+    function updateVibrationStatus(remainingVibrations) {
+        document.getElementById('totalVibrations').textContent = remainingVibrations;
+    }
+
+    async function updateBLEValue(field) {
+        try {
+            if (!device || !device.gatt.connected) {
+                console.warn('Cannot update BLE value: Device not connected.');
+                handleBleDisconnected(); // Show disconnection message
+                return;
+            }
+            await runGattOp(async function () {
+                let value;
+                switch (field) {
+                    case 'vibratePower':
+                        value = parseInt(document.getElementById('vibratePower').value, 10);
+                        if (charVibratePower) {
+                            const buffer = new ArrayBuffer(1);
+                            new DataView(buffer).setUint8(0, value);
+                            await charVibratePower.writeValue(buffer);
+                        }
+                        break;
+                    case 'pulseInterval':
+                        value = parseInt(document.getElementById('pulseInterval').value, 10);
+                        if (charPulseInterval) {
+                            const buffer = new ArrayBuffer(2);
+                            new DataView(buffer).setUint16(0, value, true);
+                            await charPulseInterval.writeValue(buffer);
+                        }
+                        break;
+                    case 'pulseNumber':
+                        value = parseInt(document.getElementById('pulseNumber').value, 10);
+                        if (charPulseNumber) {
+                            const buffer = new ArrayBuffer(2);
+                            new DataView(buffer).setUint16(0, value, true);
+                            await charPulseNumber.writeValue(buffer);
+                        }
+                        break;
+                    case 'vibrationDuration':
+                        value = parseInt(document.getElementById('vibrationDuration').value, 10);
+                        if (charVibrationDuration) {
+                            const buffer = new ArrayBuffer(2);
+                            new DataView(buffer).setUint16(0, value, true);
+                            await charVibrationDuration.writeValue(buffer);
+                        }
+                        break;
+                    case 'postDelay':
+                        value = parseInt(document.getElementById('postDelay').value, 10);
+                        let currentRepeatCountForDelay = parseInt(document.getElementById('repeatCount').value, 10);
+                        if (charStart) {
+                            const buffer = new ArrayBuffer(7);
+                            const view = new DataView(buffer);
+                            view.setUint8(0, BLE_CMD_UPDATE_CONFIG); // Update config without stopping a scenario
+                            view.setUint16(1, value, true); // New Post Delay
+                            view.setUint8(3, currentRepeatCountForDelay); // Current Repeat Count
+                            view.setUint16(4, 0, true); // Placeholder for voltage
+                            view.setUint8(6, 0); // Placeholder for remaining scenarios
+                            await charStart.writeValue(buffer);
+                            console.log(`?? Sent Post Delay update: ${value} minutes, repeat: ${currentRepeatCountForDelay}`);
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                        break;
+                    case 'repeatCount':
+                        value = parseInt(document.getElementById('repeatCount').value, 10);
+                        let currentPostDelayForRepeat = parseInt(document.getElementById('postDelay').value, 10);
+                        if (charStart) {
+                            const buffer = new ArrayBuffer(7);
+                            const view = new DataView(buffer);
+                            view.setUint8(0, BLE_CMD_UPDATE_CONFIG); // Update config without stopping a scenario
+                            view.setUint16(1, currentPostDelayForRepeat, true); // Current Post Delay
+                            view.setUint8(3, value); // New Repeat Count
+                            view.setUint16(4, 0, true); // Placeholder for voltage
+                            view.setUint8(6, 0); // Placeholder for remaining scenarios
+                            await charStart.writeValue(buffer);
+                            console.log(`?? Sent Repeat Count update: ${value}, postDelay: ${currentPostDelayForRepeat}`);
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                        break;
+                }
+            });
+        } catch (error) {
+            console.error(`Failed to update ${field} on BLE:`, error);
+            handleBleDisconnected(); // Also handle disconnection on write errors
+        }
+    }
+
+    async function loadSettingsFromBLE() {
+        try {
+            if (!device || !device.gatt.connected) {
+                console.warn('Cannot load settings: Device not connected.');
+                return;
+            }
+
+            const vibratePowerValue = await charVibratePower.readValue();
+            const vibratePower = new DataView(vibratePowerValue.buffer).getUint8(0);
+            document.getElementById('vibratePower').value = vibratePower;
+
+            const pulseIntervalValue = await charPulseInterval.readValue();
+            const pulseInterval = new DataView(pulseIntervalValue.buffer).getUint16(0, true);
+            document.getElementById('pulseInterval').value = pulseInterval;
+
+            const pulseNumberValue = await charPulseNumber.readValue();
+            const pulseNumber = new DataView(pulseNumberValue.buffer).getUint16(0, true);
+
+            document.getElementById('pulseNumber').value = pulseNumber;
+
+            const vibrationDurationValue = await charVibrationDuration.readValue();
+            const vibrationDuration = new DataView(vibrationDurationValue.buffer).getUint16(0, true);
+            document.getElementById('vibrationDuration').value = vibrationDuration;
+
+        } catch (error) {
+            console.error("Failed to load settings from BLE: ", error);
+            handleBleDisconnected(); // Handle disconnection on read errors
+        }
+    }
+
+    function parseStartStopData(dataView) {
+        const command = dataView.getUint8(0);
+        const delay = dataView.getUint16(1, true); // true = little endian
+        const repeat = dataView.getUint8(3);
+        const voltageRaw = dataView.getUint16(4, true); // זהו המתח מוכפל ב-100
+        const remainingScenarios = dataView.getUint8(6); // בייט חדש (אינדקס 6)
+
+        const voltageV = voltageRaw / 100; // חזרה למתח ב-V
+
+        return { command, delay, repeat, voltageV, remainingScenarios };
+    }
+
+    // Function to calculate battery percentage and update icon
+    function updateBatteryDisplay(voltageV) {
+        const batteryPercentageDisplay = document.getElementById('batteryPercentageDisplay');
+        const batteryVoltageDisplay = document.getElementById('batteryVoltageDisplay');
+        const batteryIcon = document.getElementById('batteryIcon');
+
+        let percentage = 0;
+        const cleanVoltage = Number(voltageV);
+        if (batteryVoltageDisplay) {
+            batteryVoltageDisplay.textContent = isFinite(cleanVoltage) && cleanVoltage > 0 ? cleanVoltage.toFixed(2) : "--";
+        }
+        lastBatteryVoltage = isFinite(cleanVoltage) && cleanVoltage > 0 ? cleanVoltage : null;
+        if (cleanVoltage >= BATTERY_MAX_VOLTAGE) {
+            percentage = 100;
+        } else if (cleanVoltage <= BATTERY_MIN_VOLTAGE || !isFinite(cleanVoltage)) {
+            percentage = 0;
+        } else {
+            percentage = ((cleanVoltage - BATTERY_MIN_VOLTAGE) / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE)) * 100;
+            percentage = Math.round(percentage); // Round to nearest whole number
+        }
+
+        batteryPercentageDisplay.textContent = percentage;
+        lastBatteryPercent = percentage;
+
+        // Update battery icon based on percentage
+        if (percentage > 90) {
+            batteryIcon.className = 'fas fa-battery-full';
+            batteryIcon.style.color = '#28a745'; // Green
+        } else if (percentage > 60) {
+            batteryIcon.className = 'fas fa-battery-three-quarters';
+            batteryIcon.style.color = '#4CAF50'; // Darker Green
+        } else if (percentage > 30) {
+            batteryIcon.className = 'fas fa-battery-half';
+            batteryIcon.style.color = '#ffc107'; // Yellow
+        } else if (percentage > 10) {
+            batteryIcon.className = 'fas fa-battery-quarter';
+            batteryIcon.style.color = '#fd7e14'; // Orange
+        } else {
+            batteryIcon.className = 'fas fa-battery-empty';
+            batteryIcon.style.color = '#dc3545'; // Red
+        }
+    }
+
+    async function loadScenarioParams() {
+        try {
+            if (!device || !device.gatt.connected) {
+                console.warn('Cannot load scenario params: Device not connected.');
+                return;
+            }
+
+            const value = await charStart.readValue();
+            const view = new DataView(value.buffer);
+            const len = view.byteLength;
+
+            console.log('Scenario params raw data length:', len);
+            console.log('Raw data:', [...new Uint8Array(value.buffer)]);
+
+            if (len < 7) { // וודא שאנחנו מצפים ל-7 בייטים לפחות
+                console.warn('Received data length less than expected (7 bytes) for Start/Stop characteristic.');
+                return;
+            }
+
+            // השתמש ב-parseStartStopData לפענוח
+            const { command, delay, repeat, voltageV, remainingScenarios } = parseStartStopData(view);
+
+            const postDelayElem = document.getElementById('postDelay');
+            if (postDelayElem) {
+                postDelayElem.value = delay >= 10 ? delay : 10;
+            }
+
+            const repeatCountElem = document.getElementById('repeatCount');
+            if (repeatCountElem) {
+                repeatCountElem.value = repeat > 0 ? repeat : 1; // אם הערך שגוי, השתמש במינימום
+            }
+
+            // Update battery display using the new function
+            updateBatteryDisplay(voltageV);
+
+            // עדכון תצוגת תרחישים שנותרו
+            const remainingScenariosDisplay = document.getElementById('remainingScenariosDisplay');
+            if (remainingScenariosDisplay) {
+                if (remainingScenarios === 0 && (command === 0 || command === 1)) {
+                    remainingScenariosDisplay.textContent = "הסתיים (לחץ התחל מחדש)";
+                } else {
+                    remainingScenariosDisplay.textContent = remainingScenarios;
+                }
+            }
+
+            console.log("? Loaded scenario parameters:", { command, delay, repeat, voltageV, remainingScenarios });
+
+        } catch (error) {
+            console.error("? Failed to load scenario parameters:", error);
+            handleBleDisconnected(); // Handle disconnection on read errors
+        }
+
+    }
+    async function getCharacteristic(service, uuid, name, callback) {
+        try {
+            const characteristic = await service.getCharacteristic(uuid);
+            console.log(`${name} characteristic retrieved.`);
+            callback(characteristic);
+        } catch (error) {
+            console.warn(`${name} characteristic not found:`, error);
+            throw error;
+        }
+    }
+    /** גילוי מהיר: getCharacteristics() אחד במקום N קריאות סדרתיות; נופל חזרה לסדרתי אם נכשל. */
+    async function discoverCharsBatch_(service, specs) {
+        var map = null;
+        try {
+            var all = await service.getCharacteristics();
+            map = {};
+            for (var i = 0; i < all.length; i++) map[String(all[i].uuid).toLowerCase()] = all[i];
+        } catch (e) {
+            console.warn('getCharacteristics() batch failed — fallback to sequential:', e);
+            map = null;
+        }
+        for (var s = 0; s < specs.length; s++) {
+            var sp = specs[s];
+            var c = map ? map[String(sp.uuid).toLowerCase()] : null;
+            if (c) sp.set(c);
+            else await getCharacteristic(service, sp.uuid, sp.name, sp.set);
+        }
+    }
+    function setScenarioStatus_(text, isError) {
+        var sm = document.getElementById('statusMessage');
+        if (!sm) return;
+        sm.textContent = text;
+        sm.style.color = isError ? '#b45309' : '';
+    }
+
+    async function startScenario() {
+        try {
+            if (_isInventoryMode) {
+                setScenarioStatus_('מצב עדכון קושחה בלבד — אין הפעלת תרחישים. רשמו את הצמיד או השתמשו ב״התחבר לצמיד״ אחרי רישום.', true);
+                return;
+            }
+            if (_otaInProgress) {
+                setScenarioStatus_('מתבצע עדכון קושחה (OTA) — המתינו לסיום והתחברו מחדש.', true);
+                return;
+            }
+            if (isSyncingLogs) {
+                setScenarioStatus_('מסנכרן לוגים מהצמיד — המתינו לסיום ואז לחצו התחל.', true);
+                return;
+            }
+
+            if (!device || !device.gatt.connected) {
+                setScenarioStatus_('אין חיבור BLE — לחצו ״התחבר לצמיד״.', true);
+                return;
+            }
+
+            var battPct = lastBatteryPercent != null ? lastBatteryPercent : parseInt(document.getElementById('batteryPercentageDisplay').textContent, 10);
+            var battV = lastBatteryVoltage;
+            if ((isFinite(battPct) && battPct < 15) || (battV != null && battV > 0 && battV < 3.45)) {
+                setScenarioStatus_('סוללה נמוכה מדי להפעלת תרחיש (' + (isFinite(battPct) ? battPct + '%' : '') +
+                    (battV != null && battV > 0 ? ', ' + battV.toFixed(2) + 'V' : '') + '). טענו את הצמיד.', true);
+                return;
+            }
+
+            let postDelayMinutes = parseInt(document.getElementById('postDelay').value, 10);
+            if (isNaN(postDelayMinutes) || postDelayMinutes < 10) {
+                postDelayMinutes = 10;
+                document.getElementById('postDelay').value = '10';
+            }
+
+            let repeatCountValue = parseInt(document.getElementById('repeatCount').value, 10);
+            if (isNaN(repeatCountValue) || repeatCountValue < 1) {
+                console.warn('? Repeat count invalid, using minimum 1.');
+                repeatCountValue = 1;
+            }
+
+            // We do not read battery voltage from UI for sending, it's received from device
+            // The battery voltage is part of the notification from the device, not sent to it.
+
+            if (charStart) {
+                const buffer = new ArrayBuffer(7);
+                const view = new DataView(buffer);
+                view.setUint8(0, BLE_CMD_START); // Command: Start
+                view.setUint16(1, postDelayMinutes, true); // Delay in minutes (2 bytes, little-endian)
+                view.setUint8(3, repeatCountValue); // Number of repeats (1 byte)
+
+                // Placeholder for voltage (will be updated by device notification)
+                // Sending 0 for voltage as it's a read-only value from the device perspective
+                view.setUint16(4, 0, true);
+                view.setUint8(6, repeatCountValue); // Total repeats, used as "remaining" initially
+
+                console.log(`?? Sending Start: delay=${postDelayMinutes}, repeat=${repeatCountValue}, initial_remaining=${repeatCountValue}`);
+
+                await runGattOp(async function () {
+                    await charStart.writeValue(buffer);
+                });
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                beginWebSession_();
+                sessionWasActive = true;
+                sendSessionStartToServer();
+                setScenarioStatus_('פקודת התחלה נשלחה לצמיד. ממתינים לאישור מהמכשיר...', false);
+
+                // ה-UI יעודכן באופן אוטומטי כאשר ה-ESP32 ישלח נוטיפיקציה
+                // דרך ה-characteristicvaluechanged event listener (handleStartStopUpdate).
+            } else {
+                setScenarioStatus_('מאפיין Start/Stop לא זמין — נתקו והתחברו מחדש.', true);
+            }
+        } catch (error) {
+            console.error("? Failed to send start scenario command:", error);
+            setScenarioStatus_('שגיאה בשליחת התחלה: ' + (error && error.message ? error.message : error), true);
+        }
+    }
+
+
+    async function stopScenario() {
+        try {
+            // בדוק אם המכשיר מחובר לפני ניסיון לשלוח פקודה
+            if (!device || !device.gatt.connected) {
+                console.warn('Cannot stop scenario: Device not connected. Please connect first.');
+                return;
+            }
+
+            // וודא שמאפיין ה-Start/Stop קיים
+            if (charStop) {
+                const buffer = new ArrayBuffer(1);
+                new DataView(buffer).setUint8(0, BLE_CMD_STOP); // Command: stop
+
+                await runGattOp(async function () {
+                    await charStop.writeValue(buffer);
+                });
+                console.log("Stop scenario command sent.");
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // After requesting stop from the bracelet, log this session end to Google Sheets (Apps Script)
+                sendSessionLogToServer("MANUAL_STOP");
+            } else {
+                console.warn('charStop characteristic is not available. Cannot stop scenario.');
+            }
+        } catch (error) {
+            console.error("Failed to stop scenario:", error);
+
+        }
+    }
+
+    // ===================== NMPT: מודול מצב זוגי (יד + רגל) — ארכיטקטורה A =====================
+
+    /** טוען מהשרת את מצב המשתמש (יחיד/זוגי) לפי MAC הצמיד המחובר. */
+    async function loadUserDeviceMode(mac) {
+        try {
+            nmptHandMac = String(mac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+            if (!nmptHandMac || !LOG_WEBAPP_URL) { applyNmptMode_('SINGLE', 20, ''); return; }
+            var data = await fetchServerGetJson_('action=getUserDevices&mac=' + encodeURIComponent(nmptHandMac));
+            if (!data || !data.ok) { applyNmptMode_('SINGLE', 20, ''); return; }
+            var mode = (data.configMode === 'DUAL') ? 'DUAL' : 'SINGLE';
+            var legMac = (mode === 'DUAL' && data.leg) ? String(data.leg.mac || '') : '';
+            // אם הצמיד המחובר הוא הרגל — הצמיד המקביל הוא היד
+            if (mode === 'DUAL' && data.leg && data.leg.mac &&
+                data.leg.mac.toUpperCase() === nmptHandMac && data.hand) {
+                legMac = String(data.hand.mac || '');
+            }
+            applyNmptMode_(mode, data.legDelaySec || 20, legMac);
+        } catch (e) {
+            console.warn('loadUserDeviceMode failed:', e);
+            applyNmptMode_('SINGLE', 20, '');
+        }
+    }
+
+    function applyNmptMode_(mode, legDelaySec, legMac) {
+        nmptMode = (mode === 'DUAL') ? 'DUAL' : 'SINGLE';
+        nmptLegDelaySec = (parseInt(legDelaySec, 10) > 0) ? parseInt(legDelaySec, 10) : 20;
+        nmptLegMac = String(legMac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        var panel = document.getElementById('nmptDualPanel');
+        var delayInput = document.getElementById('nmptLegDelayInput');
+        if (delayInput) delayInput.value = nmptLegDelaySec;
+        if (panel) {
+            if (nmptMode === 'DUAL') panel.classList.add('is-visible');
+            else panel.classList.remove('is-visible');
+        }
+        var banner = document.getElementById('nmptDualBanner');
+        if (banner) {
+            banner.innerHTML = (nmptMode === 'DUAL')
+                ? 'משתמש זוגי: יד <strong>' + formatMacDisplay_(nmptHandMac) + '</strong>' +
+                  (nmptLegMac ? ' · רגל <strong>' + formatMacDisplay_(nmptLegMac) + '</strong>' : ' · חברו את צמיד הרגל') +
+                  ' · השהיית רגל ' + nmptLegDelaySec + ' שניות'
+                : '';
+        }
+    }
+
+    function setNmptDualStatus_(msg, isError) {
+        var el = document.getElementById('nmptDualStatus');
+        if (!el) return;
+        el.textContent = msg || '';
+        if (isError) el.classList.add('is-error');
+        else el.classList.remove('is-error');
+    }
+
+    /** חיבור צמיד הרגל (מכשיר BLE שני, GATT נפרד). */
+    async function connectLegDevice() {
+        try {
+            if (!navigator.bluetooth || !isSecureBleContext_()) {
+                setNmptDualStatus_('Web Bluetooth לא זמין.', true); return;
+            }
+            setNmptDualStatus_('בחרו את צמיד הרגל...', false);
+            legDevice = await pickBleDevice_();
+            legDevice.addEventListener('gattserverdisconnected', function () {
+                var s = document.getElementById('nmptLegStatus');
+                if (s) {
+                    s.textContent = 'נותק';
+                    s.classList.remove('is-connected');
+                    s.classList.add('is-disconnected');
+                }
+            });
+            var legMacDetected = extractMacFromDeviceName(legDevice.name || '');
+            legServer = await legDevice.gatt.connect();
+            legService = await legServer.getPrimaryService(mainServiceUuid);
+            await getCharacteristic(legService, charUuidVibratePower, 'Leg Vibrate Power', (c) => legCharVibratePower = c);
+            await getCharacteristic(legService, charUuidPulseInterval, 'Leg Pulse Interval', (c) => legCharPulseInterval = c);
+            await getCharacteristic(legService, charUuidPulseNumber, 'Leg Pulse Number', (c) => legCharPulseNumber = c);
+            await getCharacteristic(legService, charUuidVibrationDuration, 'Leg Vibration Duration', (c) => legCharVibrationDuration = c);
+            await getCharacteristic(legService, charUuidStartStop, 'Leg Start/Stop', (c) => legCharStart = c);
+            if (legMacDetected) nmptLegMac = legMacDetected.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+            var s = document.getElementById('nmptLegStatus');
+            if (s) {
+                s.textContent = 'מחובר · ' + formatMacDisplay_(nmptLegMac || '');
+                s.classList.remove('is-disconnected');
+                s.classList.add('is-connected');
+            }
+            setNmptDualStatus_('צמיד הרגל מחובר.', false);
+        } catch (e) {
+            console.error('connectLegDevice failed:', e);
+            setNmptDualStatus_('חיבור צמיד הרגל נכשל: ' + (e && e.message ? e.message : e), true);
+        }
+    }
+
+    /** כתיבת פרמטרים אישיים למכשיר (עוצמה/מרווח/מספר/משך). */
+    async function nmptWritePerDeviceParams_(chars, p) {
+        if (chars.vibratePower && p.vibratePower != null) {
+            const b = new ArrayBuffer(1); new DataView(b).setUint8(0, p.vibratePower);
+            await chars.vibratePower.writeValue(b);
+        }
+        if (chars.pulseInterval && p.pulseInterval != null) {
+            const b = new ArrayBuffer(2); new DataView(b).setUint16(0, p.pulseInterval, true);
+            await chars.pulseInterval.writeValue(b);
+        }
+        if (chars.pulseNumber && p.pulseNumber != null) {
+            const b = new ArrayBuffer(2); new DataView(b).setUint16(0, p.pulseNumber, true);
+            await chars.pulseNumber.writeValue(b);
+        }
+        if (chars.vibrationDuration && p.vibrationDuration != null) {
+            const b = new ArrayBuffer(2); new DataView(b).setUint16(0, p.vibrationDuration, true);
+            await chars.vibrationDuration.writeValue(b);
+        }
+    }
+
+    /** שליחת פקודת START עם פרמטרים משותפים (postDelay + repeats). */
+    async function nmptSendStart_(startChar, postDelayMinutes, repeatCountValue) {
+        const buffer = new ArrayBuffer(7);
+        const view = new DataView(buffer);
+        view.setUint8(0, BLE_CMD_START);
+        view.setUint16(1, postDelayMinutes, true);
+        view.setUint8(3, repeatCountValue);
+        view.setUint16(4, 0, true);
+        view.setUint8(6, repeatCountValue);
+        await startChar.writeValue(buffer);
+    }
+
+    /** שמור והפעל את שני הצמידים בסנכרון: יד מיד, רגל אחרי טיימר. */
+    async function saveAndActivateDual() {
+        try {
+            if (!device || !device.gatt.connected) { setNmptDualStatus_('צמיד היד לא מחובר.', true); return; }
+            if (!legDevice || !legDevice.gatt.connected) { setNmptDualStatus_('צמיד הרגל לא מחובר — לחצו "חבר את צמיד הרגל".', true); return; }
+
+            // פרמטרים משותפים (גלובליים לשני הצמידים)
+            let postDelayMinutes = parseInt(document.getElementById('postDelay').value, 10);
+            if (isNaN(postDelayMinutes) || postDelayMinutes < 10) { postDelayMinutes = 10; document.getElementById('postDelay').value = '10'; }
+            let repeatCountValue = parseInt(document.getElementById('repeatCount').value, 10);
+            if (isNaN(repeatCountValue) || repeatCountValue < 1) repeatCountValue = 1;
+
+            // זמן השהיית רגל
+            let legDelay = parseInt(document.getElementById('nmptLegDelayInput').value, 10);
+            if (isNaN(legDelay) || legDelay < 1) legDelay = nmptLegDelaySec || 20;
+            nmptLegDelaySec = legDelay;
+
+            // פרמטרים אישיים
+            const handParams = {
+                vibratePower: parseInt(document.getElementById('vibratePower').value, 10) || null,
+                pulseInterval: parseInt(document.getElementById('pulseInterval').value, 10) || null,
+                pulseNumber: parseInt(document.getElementById('pulseNumber').value, 10) || null,
+                vibrationDuration: parseInt(document.getElementById('vibrationDuration').value, 10) || null
+            };
+            const legParams = {
+                vibratePower: parseInt(document.getElementById('legVibratePower').value, 10) || null,
+                pulseInterval: parseInt(document.getElementById('legPulseInterval').value, 10) || null,
+                pulseNumber: parseInt(document.getElementById('legPulseNumber').value, 10) || null,
+                vibrationDuration: parseInt(document.getElementById('legVibrationDuration').value, 10) || null
+            };
+
+            setNmptDualStatus_('שומר הגדרות ומפעיל את היד...', false);
+
+            await runGattOp(async function () {
+                // כתיבת פרמטרים אישיים לכל מכשיר
+                await nmptWritePerDeviceParams_({
+                    vibratePower: charVibratePower, pulseInterval: charPulseInterval,
+                    pulseNumber: charPulseNumber, vibrationDuration: charVibrationDuration
+                }, handParams);
+                await nmptWritePerDeviceParams_({
+                    vibratePower: legCharVibratePower, pulseInterval: legCharPulseInterval,
+                    pulseNumber: legCharPulseNumber, vibrationDuration: legCharVibrationDuration
+                }, legParams);
+                // הפעלת היד מיד
+                await nmptSendStart_(charStart, postDelayMinutes, repeatCountValue);
+            });
+
+            beginWebSession_();
+            sessionWasActive = true;
+            sendSessionStartToServer();
+            setNmptDualStatus_('היד פעילה. הרגל תופעל בעוד ' + legDelay + ' שניות...', false);
+
+            // טיימר JS (Non-blocking) להפעלת הרגל
+            if (nmptLegTimer) { clearTimeout(nmptLegTimer); nmptLegTimer = null; }
+            nmptLegTimer = setTimeout(async function () {
+                try {
+                    if (!legDevice || !legDevice.gatt.connected) { setNmptDualStatus_('הרגל התנתקה לפני ההפעלה.', true); return; }
+                    await runGattOp(async function () {
+                        await nmptSendStart_(legCharStart, postDelayMinutes, repeatCountValue);
+                    });
+                    setNmptDualStatus_('שני הצמידים פעילים (יד + רגל).', false);
+                } catch (e) {
+                    console.error('Leg activation failed:', e);
+                    setNmptDualStatus_('הפעלת הרגל נכשלה: ' + (e && e.message ? e.message : e), true);
+                }
+            }, legDelay * 1000);
+        } catch (e) {
+            console.error('saveAndActivateDual failed:', e);
+            setNmptDualStatus_('שגיאה: ' + (e && e.message ? e.message : e), true);
+        }
+    }
+
+    /** עצירת שני הצמידים בו-זמנית + ביטול טיימר הרגל. */
+    async function stopBoth() {
+        if (nmptLegTimer) { clearTimeout(nmptLegTimer); nmptLegTimer = null; }
+        var stopBuf = function () { const b = new ArrayBuffer(1); new DataView(b).setUint8(0, BLE_CMD_STOP); return b; };
+        try {
+            await runGattOp(async function () {
+                if (charStop && device && device.gatt.connected) await charStop.writeValue(stopBuf());
+                if (legCharStart && legDevice && legDevice.gatt.connected) await legCharStart.writeValue(stopBuf());
+            });
+            setNmptDualStatus_('פקודת עצירה נשלחה לשני הצמידים.', false);
+            sendSessionLogToServer("MANUAL_STOP");
+        } catch (e) {
+            console.error('stopBoth failed:', e);
+            setNmptDualStatus_('שגיאה בעצירה: ' + (e && e.message ? e.message : e), true);
+        }
+    }
+
+    async function startBatteryTest() {
+        try {
+            if (!device || !device.gatt.connected || !charStart) {
+                console.warn('Cannot start battery test: Device not connected.');
+                return;
+            }
+            const confirmed = confirm("להתחיל בדיקת סוללה? הבדיקה מפעילה רטט 1 שניה ואז 4 שניות מנוחה, ונעצרת אוטומטית סביב 3.3V. מומלץ להתחיל מסוללה מלאה.");
+            if (!confirmed) return;
+            const buffer = new ArrayBuffer(7);
+            const view = new DataView(buffer);
+            view.setUint8(0, BLE_CMD_BATTERY_TEST);
+            view.setUint16(1, parseInt(document.getElementById('postDelay').value, 10) || 0, true);
+            view.setUint8(3, parseInt(document.getElementById('repeatCount').value, 10) || 1);
+            view.setUint16(4, 0, true);
+            view.setUint8(6, 0);
+            await runGattOp(async function () {
+                await charStart.writeValue(buffer);
+            });
+            sessionWasActive = false;
+            document.getElementById('statusMessage').textContent = "בדיקת סוללה התחילה. לעצירה ידנית לחץ עצור סנריו.";
+            console.log("Battery test command sent.");
+        } catch (error) {
+            console.error("Failed to start battery test:", error);
+        }
+    }
+
+
+
+    async function startNotifications() {
+        if (charVibrationStatus) {
+            charVibrationStatus.addEventListener('characteristicvaluechanged', handleVibrationUpdate);
+            await charVibrationStatus.startNotifications();
+            console.log('Started vibration notifications (for internal scenario progress, if used).');
+        }
+
+        // Add this: Listen for updates from the Start/Stop characteristic
+        if (charStart) {
+            charStart.addEventListener('characteristicvaluechanged', handleStartStopUpdate);
+            await charStart.startNotifications();
+            console.log('Started Start/Stop characteristic notifications.');
+        }
+
+        // Add this: Listen for updates from the OTA Status characteristic
+        if (otaStatusChar) {
+            otaStatusChar.addEventListener('characteristicvaluechanged', handleOtaStatusUpdate);
+            await otaStatusChar.startNotifications();
+            console.log('Started OTA Status characteristic notifications.');
+        }
+    }
+
+    // New function to handle Start/Stop characteristic updates
+    function handleStartStopUpdate(event) {
+        const value = event.target.value; // This is the DataView directly
+        const { command, delay, repeat, voltageV, remainingScenarios } = parseStartStopData(value);
+
+        // Update battery display using the new function
+        updateBatteryDisplay(voltageV);
+
+        lastRemainingScenarios = remainingScenarios;
+        const remainingScenariosDisplay = document.getElementById('remainingScenariosDisplay');
+        if (remainingScenariosDisplay) {
+            if (remainingScenarios === 0 && (command === 0 || command === 1)) {
+                remainingScenariosDisplay.textContent = "הסתיים (לחץ התחל מחדש)";
+            } else {
+                remainingScenariosDisplay.textContent = remainingScenarios;
+            }
+        }
+
+        console.log("BLE Start/Stop Notification:", { command, delay, repeat, voltageV, remainingScenarios });
+    }
+
+    function handleVibrationUpdate(event) {
+        const value = event.target.value.getUint16(0, true);
+        lastRemainingVibrations = value;
+        document.getElementById('totalVibrations').textContent = value;
+    }
+
+
+    async function disconnectBLE() {
+        if (_otaInProgress || _otaAwaitingReboot) {
+            var sm = document.getElementById('statusMessage');
+            if (sm) sm.textContent = 'לא ניתן לנתק בזמן עדכון קושחה — המתינו לסיום האתחול.';
+            return;
+        }
+        if (device && device.gatt.connected) {
+            device.gatt.disconnect();
+            console.log('BLE disconnected');
+            // Calling handleBleDisconnected here ensures consistent UI state
+            // and prepares for reconnection.
+            handleBleDisconnected();
+        } else {
+            // If already disconnected, just update UI
+            handleBleDisconnected();
+        }
+    }
+
+    function toggleAdvancedOptions() {
+        const section = document.getElementById('advancedOptions');
+        section.style.display = section.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // --- OTA Update Functions ---
+
+    // Event listener for file input change
+    document.getElementById('firmwareFile').addEventListener('change', (event) => {
+        const startOtaButton = document.getElementById('startOtaButton');
+        if (event.target.files.length > 0 && device && device.gatt.connected) {
+            startOtaButton.disabled = false;
+            document.getElementById('otaStatusMessage').textContent = `קובץ נבחר: ${event.target.files[0].name}`;
+            document.getElementById('otaStatusMessage').style.color = 'black'; // Reset color
+        } else {
+            startOtaButton.disabled = true;
+            document.getElementById('otaStatusMessage').textContent = 'בחר קובץ קושחה (.bin) והתחבר למכשיר.';
+            document.getElementById('otaStatusMessage').style.color = 'gray'; // Default informative color
+        }
+    });
+
+    async function prepareOtaUiForTransfer_() {
+        var startBtn = document.getElementById('startButton');
+        if (startBtn) startBtn.disabled = true;
+        sessionWasActive = false;
+    }
+
+    async function waitAfterOtaEndCommand_(statusMsgEl, otaStatusEl) {
+        var sec = Math.round(OTA_REBOOT_WAIT_MS / 1000);
+        var msg = 'ממתין ' + sec + ' שניות — הצמיד מאתחל. אל תלחצו עצור/התחל.';
+        if (otaStatusEl) {
+            otaStatusEl.textContent = msg;
+            otaStatusEl.style.color = 'orange';
+        }
+        if (statusMsgEl) statusMsgEl.textContent = msg;
+        await new Promise(function (resolve) { setTimeout(resolve, OTA_REBOOT_WAIT_MS); });
+    }
+
+    async function sendChunkWithRetry_(chunk, retries) {
+        if (!otaDataChar) throw new Error('OTA Data Characteristic not available.');
+        var maxTry = retries != null ? retries : 4;
+        var lastErr = null;
+        for (var attempt = 0; attempt < maxTry; attempt++) {
+            try {
+                await otaDataChar.writeValueWithoutResponse(chunk);
+                return;
+            } catch (e) {
+                lastErr = e;
+                await new Promise(function (r) { setTimeout(r, 80 * (attempt + 1)); });
+            }
+        }
+        throw lastErr;
+    }
+
+    async function uploadOtaFirmwareBytes_(firmwareData, ui) {
+        ui = ui || {};
+        var firmwareSize = firmwareData.length;
+        if (server && typeof server.requestConnectionPriority === 'function') {
+            try {
+                await server.requestConnectionPriority('high');
+            } catch (prioErr) {
+                console.warn('requestConnectionPriority failed:', prioErr);
+            }
+        }
+        await prepareOtaUiForTransfer_();
+        var startCommand = new ArrayBuffer(5);
+        var startView = new DataView(startCommand);
+        startView.setUint8(0, OTA_COMMAND_START);
+        startView.setUint32(1, firmwareSize, true);
+        await runGattOp(async function () {
+            await otaControlChar.writeValue(startCommand);
+        });
+        await new Promise(function (resolve) { setTimeout(resolve, 600); });
+        var bytesSent = 0;
+        for (var i = 0; i < firmwareSize; i += MAX_CHUNK_SIZE) {
+            var chunk = firmwareData.slice(i, i + MAX_CHUNK_SIZE);
+            await sendChunkWithRetry_(chunk);
+            bytesSent += chunk.length;
+            var progress = Math.min(99, Math.floor((bytesSent / firmwareSize) * 100));
+            if (ui.otaProgressBar) {
+                ui.otaProgressBar.style.width = progress + '%';
+                ui.otaProgressBar.textContent = progress + '%';
+            }
+            if (ui.otaStatusMessage) {
+                ui.otaStatusMessage.textContent = 'מעלה קושחה: ' + bytesSent + '/' + firmwareSize + ' (' + progress + '%)';
+            }
+            await new Promise(function (resolve) { setTimeout(resolve, OTA_CHUNK_DELAY_MS); });
+        }
+        if (ui.otaStatusMessage) ui.otaStatusMessage.textContent = 'כל הנתונים נשלחו. מאמת ומאתחל צמיד...';
+        var endCommand = new ArrayBuffer(1);
+        new DataView(endCommand).setUint8(0, OTA_COMMAND_END);
+        _otaEndCommandSent = true;
+        _otaExpectedReboot = true;
+        _otaAwaitingReboot = true;
+        scheduleOtaRebootGrace_(120000);
+        await runGattOp(async function () {
+            await otaControlChar.writeValue(endCommand);
+        });
+        if (ui.otaProgressBar) {
+            ui.otaProgressBar.style.width = '100%';
+            ui.otaProgressBar.textContent = '100%';
+        }
+        await waitAfterOtaEndCommand_(ui.statusMessage, ui.otaStatusMessage);
+    }
+
+    async function startOtaUpdate() {
+        const firmwareFile = document.getElementById('firmwareFile').files[0];
+        const otaProgressBar = document.getElementById('otaProgressBar');
+        const otaProgressBarContainer = document.getElementById('otaProgressBarContainer'); // Get the element
+        const otaStatusMessage = document.getElementById('otaStatusMessage');
+        const startOtaButton = document.getElementById('startOtaButton');
+
+        if (!firmwareFile) {
+            otaStatusMessage.textContent = 'אנא בחר קובץ קושחה (.bin) תחילה.';
+            otaStatusMessage.style.color = 'red';
+            return;
+        }
+
+        if (!device || !device.gatt.connected || !otaControlChar || !otaDataChar || !otaStatusChar) {
+            otaStatusMessage.textContent = 'המכשיר אינו מחובר או ששירותי OTA אינם זמינים.';
+            otaStatusMessage.style.color = 'red';
+            handleBleDisconnected(); // Trigger UI reset and prompt for reconnect
+            return;
+        }
+        setOtaBleLock_(true, 'מעדכן קושחה — אל תנתקו');
+        _otaEndCommandSent = false;
+        _otaExpectedReboot = false;
+        _otaAwaitingReboot = false;
+        _otaStartedAt = Date.now();
+
+        startOtaButton.disabled = true;
+        otaProgressBarContainer.style.display = 'block'; // Now this should work
+        otaProgressBar.style.width = '0%';
+        otaProgressBar.textContent = '0%';
+        otaStatusMessage.textContent = 'מתחיל עדכון קושחה...';
+        otaStatusMessage.style.color = 'blue';
+
+        _pendingManualOtaMeta = {
+            fileName: firmwareFile.name,
+            oldVer: String(_currentFirmwareVersion || ''),
+            newVer: parseFirmwareVersionFromFileName(firmwareFile.name) || '',
+            size: firmwareFile.size || ''
+        };
+
+        try {
+            // Read firmware file as ArrayBuffer
+            const reader = new FileReader();
+            reader.readAsArrayBuffer(firmwareFile);
+
+            await new Promise((resolve, reject) => {
+                reader.onload = resolve;
+                reader.onerror = reject;
+            });
+
+            const firmwareData = new Uint8Array(reader.result);
+            const firmwareSize = firmwareData.length;
+            console.log(`Firmware size: ${firmwareSize} bytes`);
+            const macOta = extractMacFromDeviceName(device ? device.name || '' : '');
+            if (macOta) {
+                postBraceletEvent(macOta, buildOtaEvent('OTA_START', {
+                    oldVer: _currentFirmwareVersion,
+                    newVer: _pendingManualOtaMeta.newVer,
+                    fileName: firmwareFile.name,
+                    size: firmwareSize
+                }));
+            }
+
+            await uploadOtaFirmwareBytes_(firmwareData, {
+                otaProgressBar: otaProgressBar,
+                otaStatusMessage: otaStatusMessage,
+                statusMessage: document.getElementById('statusMessage')
+            });
+            otaStatusMessage.textContent = 'OTA הושלם — התחברו מחדש לאימות גרסה.';
+            otaStatusMessage.style.color = 'green';
+            if (macOta && _pendingManualOtaMeta && _pendingManualOtaMeta.newVer) {
+                rememberPendingOtaVerification(macOta, {
+                    oldVer: _currentFirmwareVersion,
+                    newVer: _pendingManualOtaMeta.newVer,
+                    fileName: _pendingManualOtaMeta.fileName,
+                    size: _pendingManualOtaMeta.size
+                });
+            }
+
+        } catch (error) {
+            console.error('OTA update failed:', error);
+            if (isLikelyOtaRebootError(error)) {
+                otaStatusMessage.textContent = 'העדכון כנראה הסתיים והצמיד אתחל. התחבר מחדש כדי לאמת גרסה.';
+                otaStatusMessage.style.color = 'orange';
+                const macMaybeOk = extractMacFromDeviceName(device ? device.name || '' : '');
+                if (macMaybeOk && _pendingManualOtaMeta) {
+                    const pendingNew = _pendingManualOtaMeta.newVer || parseFirmwareVersionFromFileName(_pendingManualOtaMeta.fileName);
+                    postFirmwareUpdateSheetLog(macMaybeOk, _currentFirmwareVersion, pendingNew || '',
+                        'דורש אימות אחרי ריסט', 'GATT נותק אחרי END_OTA; כנראה ריסט תקין של הצמיד').catch(function () { });
+                    postBraceletEvent(macMaybeOk, buildOtaEvent('OTA_SUCCESS_PENDING_RECONNECT', {
+                        oldVer: _currentFirmwareVersion,
+                        newVer: pendingNew,
+                        fileName: _pendingManualOtaMeta.fileName,
+                        size: _pendingManualOtaMeta.size
+                    }));
+                    rememberPendingOtaVerification(macMaybeOk, {
+                        oldVer: _currentFirmwareVersion,
+                        newVer: pendingNew,
+                        fileName: _pendingManualOtaMeta.fileName,
+                        size: _pendingManualOtaMeta.size
+                    });
+                }
+                _pendingManualOtaMeta = null;
+                _otaAwaitingReboot = true;
+                _otaExpectedReboot = true;
+                scheduleOtaRebootGrace_(120000);
+                return;
+            }
+            otaStatusMessage.textContent = `עדכון OTA נכשל: ${error.message}`;
+            otaStatusMessage.style.color = 'red';
+            const macFail = extractMacFromDeviceName(device ? device.name || '' : '');
+            const fn = _pendingManualOtaMeta ? _pendingManualOtaMeta.fileName : '';
+            const parsedV = parseFirmwareVersionFromFileName(fn);
+            const failTargetVer = (_pendingManualOtaMeta && _pendingManualOtaMeta.newVer) || parsedV || '';
+            clearOtaAutoDismiss_(macFail, failTargetVer);
+            if (macFail && LOG_WEBAPP_URL) {
+                postFirmwareUpdateSheetLog(macFail, _currentFirmwareVersion, parsedV || '',
+                    '\u05db\u05d9\u05e9\u05dc\u05d5\u05df', '\u05e2\u05d3\u05db\u05d5\u05df \u05d9\u05d3\u05e0\u05d9: ' + String(error.message || error)).catch(function () { });
+            }
+            _pendingManualOtaMeta = null;
+            // Send ABORT_OTA command in case of failure
+            if (otaControlChar) {
+                try {
+                    const abortCommand = new ArrayBuffer(1);
+                    new DataView(abortCommand).setUint8(0, OTA_COMMAND_ABORT);
+                    await otaControlChar.writeValue(abortCommand);
+                    console.log('Sent ABORT_OTA command due to error.');
+                } catch (abortError) {
+                    console.error('Failed to send ABORT_OTA command:', abortError);
+                }
+            }
+            finishOtaSession_({ resetUi: true });
+            startOtaButton.disabled = false;
+            return;
+        } finally {
+            if (!_otaAwaitingReboot) {
+                setOtaBleLock_(false);
+                startOtaButton.disabled = false;
+            }
+        }
+    }
+
+    async function sendChunk(chunk) {
+        return sendChunkWithRetry_(chunk);
+    }
+
+    function handleOtaStatusUpdate(event) {
+        const value = event.target.value; // DataView
+        // Check if value is long enough (at least 1 byte for status, 5 bytes for status+progress)
+        if (value.byteLength < 1) {
+            console.warn("Received empty OTA status update.");
+            return;
+        }
+
+        const statusCode = value.getUint8(0);
+        let progress = 0;
+        if (value.byteLength >= 5) { // If progress data is present
+            progress = value.getUint32(1, true); // Progress is 4 bytes, little-endian
+        }
+
+        let statusMessageText = '';
+        let messageColor = 'blue';
+        let isFinalState = false; // Flag to indicate if OTA process finished (success/fail)
+
+        // OTA Status Definitions (matching Arduino enum)
+        const OtaStatus = {
+            OTA_IDLE: 0,
+            OTA_STARTING: 1,
+            OTA_IN_PROGRESS: 2,
+            OTA_VERIFYING: 3,
+            OTA_COMPLETE: 4,
+            OTA_FAILED: 5
+        };
+
+        switch (statusCode) {
+            case OtaStatus.OTA_IDLE: statusMessageText = 'OTA: מוכן'; messageColor = 'gray'; break;
+            case OtaStatus.OTA_STARTING: statusMessageText = 'OTA: מתחיל...'; messageColor = 'blue'; break;
+            case OtaStatus.OTA_IN_PROGRESS:
+                // Progress is often sent by device, but if not, we can use local progress
+                const firmwareFileSize = document.getElementById('firmwareFile').files[0] ? document.getElementById('firmwareFile').files[0].size : 1;
+                // Use the 'progress' value sent by the device if available and valid
+                let displayProgress = progress;
+                if (firmwareFileSize > 0) { // Calculate percentage if file size is known
+                    displayProgress = Math.min(100, Math.floor((progress / firmwareFileSize) * 100));
+                }
+                document.getElementById('otaProgressBar').style.width = `${displayProgress}%`;
+                document.getElementById('otaProgressBar').textContent = `${displayProgress}%`;
+                statusMessageText = `OTA: מעלה קושחה... ${displayProgress}%`;
+                messageColor = 'blue';
+                break;
+            case OtaStatus.OTA_VERIFYING: statusMessageText = 'OTA: מאמת וצורב קושחה...'; messageColor = 'orange'; break;
+            case OtaStatus.OTA_COMPLETE:
+                statusMessageText = 'OTA: הסתיים בהצלחה! המכשיר יופעל מחדש.'; messageColor = 'green';
+                document.getElementById('otaProgressBar').style.width = '100%';
+                document.getElementById('otaProgressBar').textContent = '100%';
+                isFinalState = true;
+                break;
+            case OtaStatus.OTA_FAILED:
+                statusMessageText = 'OTA: נכשל! אנא נסה שוב.'; messageColor = 'red';
+                document.getElementById('otaProgressBar').style.width = '0%';
+                document.getElementById('otaProgressBar').textContent = 'נכשל';
+                isFinalState = true;
+                break;
+            default: statusMessageText = `OTA: סטטוס לא ידוע (0x${statusCode.toString(16)})`; messageColor = 'gray'; break;
+        }
+
+        console.log(`OTA Status Update: ${statusMessageText} (Code: 0x${statusCode.toString(16)}, Raw Progress: ${progress})`);
+        document.getElementById('otaStatusMessage').textContent = statusMessageText;
+        document.getElementById('otaStatusMessage').style.color = messageColor;
+
+        if (isFinalState) {
+            document.getElementById('startOtaButton').disabled = false; // Re-enable button
+            if (statusCode === OtaStatus.OTA_COMPLETE) {
+                if (_pendingManualOtaMeta && device && LOG_WEBAPP_URL) {
+                    const mac = extractMacFromDeviceName(device.name || '');
+                    const fn = _pendingManualOtaMeta.fileName;
+                    const oldV = _pendingManualOtaMeta.oldVer;
+                    const newV = _pendingManualOtaMeta.newVer || parseFirmwareVersionFromFileName(fn) || '\u05d9\u05d3\u05e0\u05d9';
+                    postFirmwareUpdateSheetLog(mac, oldV, newV, '\u05d4\u05e6\u05dc\u05d9\u05d7\u05d4', '\u05e7\u05d5\u05d1\u05e5 \u05de\u05e7\u05d5\u05de\u05d9: ' + fn).catch(function () { });
+                    postBraceletEvent(mac, buildOtaEvent('OTA_SUCCESS_PENDING_RECONNECT', {
+                        oldVer: oldV,
+                        newVer: newV,
+                        fileName: fn,
+                        size: _pendingManualOtaMeta.size
+                    }));
+                    rememberPendingOtaVerification(mac, {
+                        oldVer: oldV,
+                        newVer: newV,
+                        fileName: fn,
+                        size: _pendingManualOtaMeta.size
+                    });
+                    _pendingManualOtaMeta = null;
+                }
+                // If successful, prompt for reconnect after a short delay for user to read message
+                setTimeout(() => {
+                    document.getElementById('otaStatusMessage').textContent = 'העדכון הסתיים בהצלחה. המכשיר יופעל מחדש. אנא התחבר מחדש.';
+                    finishOtaSession_({ resetUi: true });
+                }, 2000);
+            } else if (statusCode === OtaStatus.OTA_FAILED) {
+                if (_otaInProgress && !_otaAwaitingReboot) {
+                    console.warn('OTA_FAILED notify during transfer — keep BLE device for retry.');
+                    return;
+                }
+                if (_pendingManualOtaMeta && device && LOG_WEBAPP_URL) {
+                    const mac = extractMacFromDeviceName(device.name || '');
+                    const fn = _pendingManualOtaMeta.fileName;
+                    const oldV = _pendingManualOtaMeta.oldVer;
+                    const newV = parseFirmwareVersionFromFileName(fn) || '';
+                    postFirmwareUpdateSheetLog(mac, oldV, newV, '\u05db\u05d9\u05e9\u05dc\u05d5\u05df',
+                        'OTA_FAILED (\u05d3\u05d9\u05d5\u05d5\u05d7 \u05de\u05db\u05e9\u05d9\u05e8), \u05e7\u05d5\u05d1\u05e5: ' + fn).catch(function () { });
+                    _pendingManualOtaMeta = null;
+                }
+                finishOtaSession_({ resetUi: true });
+            }
+        }
+    }
+
+    async function checkMacAndShowRegistration() {
+        try {
+            if (!device || !LOG_WEBAPP_URL) return;
+            const mac = extractMacFromDeviceName(device.name || '');
+            if (!mac) return;
+            const o = await fetchServerGetJson_('action=checkMac&mac=' + encodeURIComponent(mac));
+            if (!o.ok || o.registered) return; // רשום – לא צריך להציג כלום
+            // לא רשום – הצג התראה עם קישור לטופס
+            const notif = document.getElementById('macRegNotification');
+            const msg = document.getElementById('macRegMsg');
+            const link = document.getElementById('macRegLink');
+            if (!notif || !msg || !link) return;
+            msg.textContent = 'הצמיד ' + (o.mac || mac) + ' לא נמצא בגיליון הרשמה. יש לרשום אותו.';
+            link.href = o.registerUrl || (LOG_WEBAPP_URL + '?page=register&mac=' + encodeURIComponent(mac));
+            notif.classList.add('is-visible');
+            console.log('MAC not registered:', mac);
+        } catch (err) {
+            console.warn('checkMacAndShowRegistration failed:', err);
+        }
+    }
+
+    function closeRegNotif() {
+        const n = document.getElementById('macRegNotification');
+        if (n) n.classList.remove('is-visible');
+    }
+
+    /* logFwUpdate via GET + localStorage queue */
+    async function postFirmwareUpdateSheetLog(mac, oldVer, newVer, status, notes) {
+        if (!mac || !LOG_WEBAPP_URL) return;
+        var notesStr = (notes != null ? String(notes) : '').slice(0, 350);
+        var st = status || '\u05d4\u05e6\u05dc\u05d9\u05d7\u05d4';
+        var id = 'fw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        var entry = {
+            id: id,
+            mac: mac,
+            oldVer: oldVer != null ? String(oldVer) : '',
+            newVer: newVer != null ? String(newVer) : '',
+            status: st,
+            notes: notesStr,
+            ts: Date.now()
+        };
+        try {
+            var j = await fetchServerGetJson_(
+                'action=logFwUpdate&mac=' + encodeURIComponent(mac) +
+                '&oldVer=' + encodeURIComponent(entry.oldVer) +
+                '&newVer=' + encodeURIComponent(entry.newVer) +
+                '&status=' + encodeURIComponent(st) +
+                '&notes=' + encodeURIComponent(notesStr)
+            );
+            if (j && j.ok) return;
+        } catch (err) {
+            console.warn('FirmwareUpdates sheet log failed, queued:', err);
+        }
+        enqueuePendingFwLog(entry);
+    }
+
+    async function runAutomaticOTA(downloadUrl, newVersion, macOpt) {
+        const statusMsg = document.getElementById('statusMessage');
+        const otaBar = document.getElementById('otaProgressBar');
+        const otaBarContainer = document.getElementById('otaProgressBarContainer');
+        const otaStatus = document.getElementById('otaStatusMessage');
+        const mac = macOpt || extractMacFromDeviceName(device ? device.name || '' : '');
+        const targetVer = String(newVersion || '');
+        setOtaBleLock_(true, 'מעדכן קושחה ' + targetVer + ' — אל תנתקו');
+        _otaEndCommandSent = false;
+        _otaExpectedReboot = false;
+        _otaAwaitingReboot = false;
+        _otaStartedAt = Date.now();
+        try {
+            _pendingManualOtaMeta = null;
+            if (otaBarContainer) otaBarContainer.style.display = 'block';
+            if (otaBar) { otaBar.style.width = '5%'; otaBar.textContent = '5%'; }
+            if (otaStatus) otaStatus.textContent = '\u05de\u05d5\u05e8\u05d9\u05d3 \u05e7\u05d5\u05e9\u05d7\u05d4 \u05d3\u05e8\u05da \u05d4\u05e9\u05e8\u05ea...';
+            if (statusMsg) statusMsg.textContent = '\u05de\u05ea\u05e2\u05d3\u05db\u05df \u05e7\u05d5\u05e9\u05d7\u05d4 ' + newVersion + '...';
+            if (USE_LOCAL_TEST_FIRMWARE) {
+                throw new Error('Local test firmware is disabled on Goldenlife');
+            }
+            // שחרור בלבד: Apps Script מחזיר את FirmwareDownloadUrl (לא firmware\\בדיקה)
+            const json = await fetchServerGetJson_('action=downloadFirmware');
+            if (!json.ok || !json.data) throw new Error(json.error || 'Download failed');
+            // Decode base64 to Uint8Array
+            const binaryStr = atob(json.data);
+            const firmware = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) firmware[i] = binaryStr.charCodeAt(i);
+            if (otaBar) { otaBar.style.width = '15%'; otaBar.textContent = '15%'; }
+            if (otaStatus) otaStatus.textContent = '\u05e7\u05d5\u05e9\u05d7\u05d4 \u05d4\u05d5\u05e8\u05d3\u05d4 (' + firmware.length + ' bytes). \u05de\u05ea\u05d7\u05d9\u05dc OTA...';
+            if (mac && LOG_WEBAPP_URL) {
+                postBraceletEvent(mac, buildOtaEvent('OTA_START', {
+                    oldVer: _currentFirmwareVersion,
+                    newVer: targetVer,
+                    fileName: 'server',
+                    size: firmware.length
+                }));
+            }
+            await uploadOtaFirmwareBytes_(firmware, {
+                otaProgressBar: otaBar,
+                otaStatusMessage: otaStatus,
+                statusMessage: statusMsg
+            });
+            if (mac && LOG_WEBAPP_URL) {
+                postBraceletEvent(mac, buildOtaEvent('OTA_SUCCESS_PENDING_RECONNECT', {
+                    oldVer: _currentFirmwareVersion,
+                    newVer: targetVer,
+                    fileName: 'server',
+                    size: firmware.length
+                }));
+                rememberPendingOtaVerification(mac, {
+                    oldVer: _currentFirmwareVersion,
+                    newVer: targetVer,
+                    fileName: 'server',
+                    size: firmware.length
+                });
+                await postFirmwareUpdateSheetLog(mac, _currentFirmwareVersion, targetVer, '\u05d4\u05e6\u05dc\u05d7\u05d4', '\u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9 \u05de\u05d4\u05e9\u05e8\u05ea');
+            }
+            if (otaStatus) otaStatus.textContent = 'OTA הושלם — התחברו מחדש לאימות גרסה.';
+            if (statusMsg) statusMsg.textContent = 'עדכון ' + targetVer + ' הושלם. התחברו מחדש.';
+            setFirmwareVersionBanner(true, targetVer, _currentFirmwareVersion || targetVer);
+        } catch (_otaErr) {
+            console.error('Auto OTA failed:', _otaErr);
+            if (isLikelyOtaRebootError(_otaErr)) {
+                if (otaStatus) otaStatus.textContent = 'העדכון כנראה הסתיים והצמיד אתחל. התחבר מחדש כדי לאמת גרסה.';
+                if (statusMsg) statusMsg.textContent = 'ממתין לאימות גרסה אחרי ריסט הצמיד. אם הגרסה עדיין ישנה — יוצע OTA שוב.';
+                if (mac && LOG_WEBAPP_URL) {
+                    await postFirmwareUpdateSheetLog(mac, _currentFirmwareVersion, targetVer, 'דורש אימות אחרי ריסט', 'GATT נותק אחרי END_OTA; כנראה ריסט תקין של הצמיד');
+                }
+                _otaAwaitingReboot = true;
+                _otaExpectedReboot = true;
+                scheduleOtaRebootGrace_(120000);
+                return;
+            }
+            clearOtaAutoDismiss_(mac, targetVer);
+            if (otaStatus) otaStatus.textContent = 'OTA \u05e0\u05db\u05e9\u05dc: ' + _otaErr.message;
+            if (statusMsg) statusMsg.textContent = '\u05e2\u05d3\u05db\u05d5\u05df \u05e0\u05db\u05e9\u05dc — בחיבור הבא יינסה שוב אוטומטית.';
+            if (mac && LOG_WEBAPP_URL) {
+                await postFirmwareUpdateSheetLog(mac, _currentFirmwareVersion, targetVer, '\u05db\u05d9\u05e9\u05dc\u05d5\u05df', String(_otaErr.message || _otaErr));
+            }
+            finishOtaSession_({ resetUi: false });
+        } finally {
+            if (!_otaAwaitingReboot) {
+                setOtaBleLock_(false);
+            }
+        }
+    }
+    initGoldenLifeEnvironmentBanner_();
+    flushPendingFirmwareLogs().catch(function () { });
+    (function () {
+        assertGlLogParserLoaded_();
+        var sm = document.getElementById("statusMessage");
+        if (sm && window.GlLogParser) {
+            sm.textContent = "Goldenlife " + GL_LOCAL_BUILD_TAG + " | parser " + window.GlLogParser.BUILD;
+        }
+    })();
+</script>
+
+</html>
