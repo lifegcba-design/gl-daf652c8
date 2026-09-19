@@ -1192,6 +1192,22 @@
                 <div id="nmptDualStatus"></div>
             </div>
 
+            <!-- 1.0.72: פרמטרי רגל דרך היד (מוסתר עד חיבור לזוגי עם קושחה תומכת) -->
+            <div id="legParamsSection" style="display:none; border:1px solid #d0d7de; border-radius:10px; padding:12px; margin:12px 0; background:#f6f8fa;">
+                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי רגל (דרך היד)</h3>
+                <label for="lp_power">Vibrate Power (רגל):</label>
+                <input type="number" id="lp_power" min="160" max="255" value="195">
+                <label for="lp_interval">Pulse Interval (רגל, ms):</label>
+                <input type="number" id="lp_interval" min="100" max="5000" value="1000">
+                <label for="lp_duration">Vibration Duration (רגל, ms):</label>
+                <input type="number" id="lp_duration" min="100" max="2000" value="400">
+                <label for="lp_delay">מתי נדלקת הרגל (שניות אחרי היד):</label>
+                <input type="number" id="lp_delay" min="1" max="3600" value="20">
+                <button type="button" onclick="writeLegParamsToHand_()"><i class="fas fa-save"></i> שמור פרמטרי רגל</button>
+                <small class="advanced-note">כמות הרטטים של הרגל = כמו היד. הערכים נשלחים לרגל בהפעלה הבאה (דרך היד).</small>
+                <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
+            </div>
+
             <button onclick="toggleAdvancedOptions()"><i class="fas fa-cogs"></i> אפשרויות מתקדמות</button>
 
             <div id="advancedOptions">
@@ -1275,6 +1291,8 @@
     const charUuidVibrationStatus = "12cfcb54-2b8a-4da4-a737-f040b6f79fc7";
     // --- NMPT: מאפיין הגדרת מכשיר (role + leg_activation_delay_sec) ---
     const charUuidDeviceConfig = "a3b9f1c2-1d4e-4b8a-9c7d-2e5f6a7b8c9d";
+    const charUuidLegParams = "b1c2d3e4-0072-4a2b-8c3d-4e5f60718293";  // 1.0.72: פרמטרי רגל דרך היד
+    let charLegParams = null;
 
     // --- Log Service UUIDs (match ESP32 LOG_SERVICE_UUID etc.) ---
     const logServiceUuid = "8c9f0001-1b2b-4f5a-9e1a-1234567890ab";
@@ -2600,6 +2618,10 @@
                 { uuid: charUuidVibrationStatus, name: 'Vibration Status', set: (c) => charVibrationStatus = c },
             ]);
 
+            // 1.0.72: מאפיין פרמטרי רגל (אופציונלי — קושחה ישנה לא תכיל אותו)
+            try { charLegParams = await service.getCharacteristic(charUuidLegParams); }
+            catch (e) { charLegParams = null; console.warn('legParams char missing (fw<1.0.72)'); }
+
             // Get OTA Service and Characteristics (now using lowercase UUID constants)
             otaService = await server.getPrimaryService(otaServiceUuid);
             await discoverCharsBatch_(otaService, [
@@ -3122,6 +3144,42 @@
         }
     }
 
+    // 1.0.72: פרמטרי רגל דרך היד — הלקוח מגדיר, האפליקציה כותבת ל-legParamsChar, היד מעבירה לרגל בהפעלה
+    function setLegParamsStatus_(msg, isErr) {
+        var el = document.getElementById('lp_status');
+        if (el) { el.textContent = msg; el.style.color = isErr ? '#c0392b' : '#1e8449'; }
+    }
+    async function showAndPopulateLegParams_(dual) {
+        var sec = document.getElementById('legParamsSection');
+        if (!sec) return;
+        if (!dual || !charLegParams) { sec.style.display = 'none'; return; }
+        try {
+            var dv = new DataView((await charLegParams.readValue()).buffer);
+            if (dv.byteLength >= 5) {
+                document.getElementById('lp_power').value = dv.getUint8(0);
+                document.getElementById('lp_interval').value = dv.getUint16(1, true);
+                document.getElementById('lp_duration').value = dv.getUint16(3, true);
+                if (dv.byteLength >= 7) document.getElementById('lp_delay').value = dv.getUint16(5, true);
+            }
+        } catch (e) { console.warn('read legParams failed', e); }
+        sec.style.display = 'block';
+    }
+    async function writeLegParamsToHand_() {
+        if (!charLegParams) { setLegParamsStatus_('קושחה ישנה — עדכן ל-1.0.72.', true); return; }
+        var pw = parseInt(document.getElementById('lp_power').value, 10) || 195;
+        var itv = parseInt(document.getElementById('lp_interval').value, 10) || 1000;
+        var dur = parseInt(document.getElementById('lp_duration').value, 10) || 400;
+        var dly = parseInt(document.getElementById('lp_delay').value, 10) || 20;
+        if (pw < 1) pw = 1; if (pw > 255) pw = 255;
+        if (dly < 1) dly = 1; if (dly > 3600) dly = 3600;
+        var buf = new ArrayBuffer(7); var dv = new DataView(buf);
+        dv.setUint8(0, pw); dv.setUint16(1, itv, true); dv.setUint16(3, dur, true); dv.setUint16(5, dly, true);
+        try {
+            await runGattOp(async function () { await charLegParams.writeValue(buf); });
+            setLegParamsStatus_('נשמר ✓ הרגל תקבל בהפעלה הבאה (עוצמה ' + pw + ', מרווח ' + itv + ', משך ' + dur + ', השהיה ' + dly + 'ש\').', false);
+        } catch (e) { setLegParamsStatus_('שגיאה: ' + (e && e.message ? e.message : e), true); }
+    }
+
     function applyNmptMode_(mode, legDelaySec, legMac) {
         nmptMode = (mode === 'DUAL') ? 'DUAL' : 'SINGLE';
         nmptLegDelaySec = (parseInt(legDelaySec, 10) > 0) ? parseInt(legDelaySec, 10) : 20;
@@ -3129,8 +3187,10 @@
         var panel = document.getElementById('nmptDualPanel');
         var delayInput = document.getElementById('nmptLegDelayInput');
         if (delayInput) delayInput.value = nmptLegDelaySec;
-        // לקוח (1.0.71): יד-בלבד — לא נוגע בחיבורי רגל/צימוד. הרגל מקבלת פרמטרים+START מהיד ב-ESP-NOW.
+        // לקוח: יד-בלבד — לא נוגע בחיבורי רגל/צימוד. הרגל מקבלת פרמטרים+START מהיד ב-ESP-NOW.
         if (panel) panel.classList.remove('is-visible');
+        // 1.0.72: מקטע פרמטרי רגל (דרך היד) — מוצג לזוגי עם קושחה תומכת
+        showAndPopulateLegParams_(nmptMode === 'DUAL');
         var banner = document.getElementById('nmptDualBanner');
         if (banner) {
             banner.innerHTML = (nmptMode === 'DUAL')
