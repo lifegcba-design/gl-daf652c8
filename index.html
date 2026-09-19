@@ -1293,6 +1293,7 @@
     const charUuidDeviceConfig = "a3b9f1c2-1d4e-4b8a-9c7d-2e5f6a7b8c9d";
     const charUuidLegParams = "b1c2d3e4-0072-4a2b-8c3d-4e5f60718293";  // 1.0.72: פרמטרי רגל דרך היד
     let charLegParams = null;
+    let charDeviceConfig = null;  // 1.0.73: קריאת role+configMode מהצמיד (להצגת מקטע רגל רק ליד בזוגי)
 
     // --- Log Service UUIDs (match ESP32 LOG_SERVICE_UUID etc.) ---
     const logServiceUuid = "8c9f0001-1b2b-4f5a-9e1a-1234567890ab";
@@ -2624,6 +2625,8 @@
             // 1.0.72: מאפיין פרמטרי רגל (אופציונלי — קושחה ישנה לא תכיל אותו)
             try { charLegParams = await service.getCharacteristic(charUuidLegParams); }
             catch (e) { charLegParams = null; console.warn('legParams char missing (fw<1.0.72)'); }
+            try { charDeviceConfig = await service.getCharacteristic(charUuidDeviceConfig); }
+            catch (e) { charDeviceConfig = null; }
             // הערה: אין לקרוא legParams כאן — קריאת GATT במקביל לשאר ה-discovery מפילה את החיבור.
             // המקטע מוצג מ-applyNmptMode_ אחרי שהחיבור הושלם.
 
@@ -3158,6 +3161,16 @@
         var sec = document.getElementById('legParamsSection');
         if (!sec) return;
         if (!charLegParams) { sec.style.display = 'none'; return; }  // 1.0.72: מוצג לכל צמיד שתומך
+        // 1.0.73: מוצג רק כשהצמיד המחובר הוא יד בזוגי (role=1 + configMode=DUAL) — נקרא מהצמיד עצמו (אמין)
+        var _configKnown = false, _isHandDual = false;
+        try {
+            if (charDeviceConfig) {
+                var _cfg = null;
+                await runGattOp(async function () { _cfg = await charDeviceConfig.readValue(); });
+                if (_cfg) { var _cv = new DataView(_cfg.buffer); if (_cv.byteLength >= 4) { _configKnown = true; _isHandDual = (_cv.getUint8(0) === 1 && _cv.getUint8(3) === 1); } }
+            }
+        } catch (e) { console.warn('deviceConfig read failed', e); }
+        if (_configKnown && !_isHandDual) { sec.style.display = 'none'; return; }  // יד יחידה / רגל / standalone → מוסתר
         try {
             var _lpv = null;
             await runGattOp(async function () { _lpv = await charLegParams.readValue(); });  // מנעול — לא במקביל לפעולות GATT אחרות
