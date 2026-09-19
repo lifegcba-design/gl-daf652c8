@@ -1495,8 +1495,10 @@
         var qs = String(queryString || '').trim();
         if (qs.charAt(0) === '?') qs = qs.slice(1);
         var url = LOG_WEBAPP_URL + (qs ? ('?' + qs) : '');
-        // file:// וגם localhost (טלפון/מקומי בלי proxy) → JSONP, כדי לעקוף CORS מול Apps Script
-        if (isFileOrigin_() || isLocalLabHost_()) {
+        // JSONP לכל origin חוצה (file://, localhost, github.io) — לעקוף CORS מול Apps Script; fetch רק כש-same-origin (proxy/GAS-hosted)
+        var _sameOrigin = false;
+        try { _sameOrigin = (new URL(url, window.location.href).origin === window.location.origin); } catch (e) { _sameOrigin = false; }
+        if (isFileOrigin_() || !_sameOrigin) {
             return jsonpGet_(url, opts.timeoutMs != null ? opts.timeoutMs : 15000);
         }
         var ctrl = null;
@@ -1544,13 +1546,12 @@
 
     /** Web App / lab proxy: POST JSON + קריאת תשובה; file://: no-cors (לוגים מגיעים לשרת בלי CORS) */
     function useJsonCorsPost_() {
-        // file:// וגם localhost בלי proxy → no-cors POST (לוגים best-effort, בלי כשל CORS)
+        // CORS POST רק כשהיעד same-origin (GAS-hosted או proxy מקומי); אחרת (file/localhost/github.io → GAS חוצה) no-cors best-effort
         if (isFileOrigin_()) return false;
-        if (isLocalLabHost_()) return false;  // localhost טלפוני בלי proxy → no-cors POST (לוגים best-effort)
-        var href = String(window.location.href || '');
-        if (/^https:\/\/script\.google\.com\/macros\/s\//i.test(href)) return true;
-        if (readServerWebAppBase_()) return true;
-        return isLocalLabHost_();
+        try {
+            if (new URL(LOG_WEBAPP_URL, window.location.href).origin === window.location.origin) return true;
+        } catch (e) { }
+        return false;
     }
 
     function buildLogPostOptions_(payload) {
@@ -1574,10 +1575,10 @@
         var banner = document.getElementById('envBanner');
         if (!banner) return;
         var proto = String(window.location.protocol || '').toLowerCase();
-        var hosted = !!readServerWebAppBase_() || /^https:\/\/script\.google\.com\/macros\/s\//i.test(window.location.href || '');
-        if (hosted && proto !== 'file:') {
+        var onGasIframe = /^https:\/\/script\.google\.com\/macros\/s\//i.test(window.location.href || '');
+        if (onGasIframe) {
             banner.className = 'warn';
-            banner.textContent = 'Goldenlife.html מיועד לקובץ מקומי — פתחו עם open-local.bat (file://), לא מ-Apps Script.';
+            banner.textContent = 'לא להריץ מ-Apps Script (Web BLE חסום ב-iframe) — פתחו כקובץ מקומי או מ-github.io.';
             return;
         }
         if (!navigator.bluetooth) {
