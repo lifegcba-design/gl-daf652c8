@@ -1324,6 +1324,7 @@
     const USE_LOCAL_TEST_FIRMWARE = false;
     let _isInventoryMode = false; // true כשהצמיד המחובר הוא ממלאי ולא רשום ללקוח
     let _bleConnecting = false;   // true במהלך connectBLE — מונע איפוס UI מ-disconnect race
+    let _autoDisconnectForLeg_ = false;   // אחרי START בלקוח: מנתקים כדי שהיד תשלח ESP-NOW לרגל (C6: אין BLE+ESP-NOW יחד)
     let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
     let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
     let _otaEndCommandSent = false;
@@ -2384,16 +2385,24 @@
             return;
         }
 
+        // ניתוק יזום אחרי START (לקוח) — הסשן מתחיל, לא נגמר: לא לרשום AUTO_STOP, והודעה ידידותית
+        var _autoStartDisc = _autoDisconnectForLeg_;
+        _autoDisconnectForLeg_ = false;
+
         // שליחת לוג אוטומטית אם הסשן היה פעיל (הצמיד נכנס לשינה אחרי סיום)
-        if (sessionWasActive && device && !_sessionEndSent) {
+        if (sessionWasActive && device && !_sessionEndSent && !_autoStartDisc) {
             console.log("Session was active when disconnected - sending AUTO_STOP log");
             sendSessionLogToServer("AUTO_STOP");
         }
 
-        document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
-
-        document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
-        document.getElementById('errorMessage').style.display = 'block';
+        if (_autoStartDisc) {
+            document.getElementById('statusMessage').textContent = 'הופעל ✓ היד + הרגל פועלות (רגל ~25ש\'). לעצירה: כפתור 3 על הצמיד, או "התחבר לצמיד" מחדש ואז עצור.';
+            document.getElementById('errorMessage').style.display = 'none';
+        } else {
+            document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
+            document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
+            document.getElementById('errorMessage').style.display = 'block';
+        }
 
         // Hide control panel, show connect button
         document.getElementById('controlPanel').style.display = 'none';
@@ -3046,10 +3055,10 @@
                 beginWebSession_();
                 sessionWasActive = true;
                 sendSessionStartToServer();
-                setScenarioStatus_('פקודת התחלה נשלחה לצמיד. ממתינים לאישור מהמכשיר...', false);
-
-                // ה-UI יעודכן באופן אוטומטי כאשר ה-ESP32 ישלח נוטיפיקציה
-                // דרך ה-characteristicvaluechanged event listener (handleStartStopUpdate).
+                // C6: אי אפשר BLE+ESP-NOW יחד — מנתקים אחרי START כדי שהיד תפעיל את הרגל דרך ESP-NOW
+                setScenarioStatus_('הופעל ✓ מפעיל את הרגל...', false);
+                _autoDisconnectForLeg_ = true;
+                setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 600);
             } else {
                 setScenarioStatus_('מאפיין Start/Stop לא זמין — נתקו והתחברו מחדש.', true);
             }
@@ -3120,10 +3129,8 @@
         var panel = document.getElementById('nmptDualPanel');
         var delayInput = document.getElementById('nmptLegDelayInput');
         if (delayInput) delayInput.value = nmptLegDelaySec;
-        if (panel) {
-            if (nmptMode === 'DUAL') panel.classList.add('is-visible');
-            else panel.classList.remove('is-visible');
-        }
+        // לקוח: לא נוגע בחיבורי רגל/צימוד — פאנל זוגי מוסתר; הרגל מופעלת אוטומטית דרך היד (ESP-NOW / כפתור 3)
+        if (panel) panel.classList.remove('is-visible');
         var banner = document.getElementById('nmptDualBanner');
         if (banner) {
             banner.innerHTML = (nmptMode === 'DUAL')
