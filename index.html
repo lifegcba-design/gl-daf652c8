@@ -1171,7 +1171,8 @@
                     <label for="legPulseInterval">Pulse Interval (רגל, ms):</label>
                     <input type="number" id="legPulseInterval" min="100" max="5000" value="1000">
                     <label for="legPulseNumber">Pulse Number (רגל):</label>
-                    <input type="number" id="legPulseNumber" min="1" max="2000" value="60">
+                    <input type="number" id="legPulseNumber" min="1" max="2000" value="60" readonly>
+                    <small class="advanced-note">כמות הרטטים זהה ליד (היד מובילה)</small>
                     <label for="legVibrationDuration">Vibration Duration (רגל, ms):</label>
                     <input type="number" id="legVibrationDuration" min="100" max="2000" value="400">
                 </div>
@@ -2719,6 +2720,11 @@
     }
 
     async function updateBLEValue(field) {
+        if (field === 'pulseNumber') {  // רגל = יד: כמות הרטטים של הרגל תמיד זהה ליד (היד מובילה)
+            var _lpn = document.getElementById('legPulseNumber');
+            var _hpn = document.getElementById('pulseNumber');
+            if (_lpn && _hpn) _lpn.value = _hpn.value;
+        }
         try {
             if (!device || !device.gatt.connected) {
                 console.warn('Cannot update BLE value: Device not connected.');
@@ -2819,6 +2825,7 @@
             const pulseNumber = new DataView(pulseNumberValue.buffer).getUint16(0, true);
 
             document.getElementById('pulseNumber').value = pulseNumber;
+            var _legPNsync = document.getElementById('legPulseNumber'); if (_legPNsync) _legPNsync.value = pulseNumber;  // רגל = יד
 
             const vibrationDurationValue = await charVibrationDuration.readValue();
             const vibrationDuration = new DataView(vibrationDurationValue.buffer).getUint16(0, true);
@@ -3231,7 +3238,7 @@
             const legParams = {
                 vibratePower: parseInt(document.getElementById('legVibratePower').value, 10) || null,
                 pulseInterval: parseInt(document.getElementById('legPulseInterval').value, 10) || null,
-                pulseNumber: parseInt(document.getElementById('legPulseNumber').value, 10) || null,
+                pulseNumber: parseInt(document.getElementById('pulseNumber').value, 10) || null,  // רגל = יד (היד מובילה את כמות הרטטים)
                 vibrationDuration: parseInt(document.getElementById('legVibrationDuration').value, 10) || null
             };
 
