@@ -2414,7 +2414,10 @@
         }
 
         if (_autoStartDisc) {
-            document.getElementById('statusMessage').textContent = 'הופעל ✓ היד + הרגל פועלות (רגל ~25ש\'). לעצירה: כפתור 3 על הצמיד, או "התחבר לצמיד" מחדש ואז עצור.';
+            var _lpD = document.getElementById('lp_delay');
+            var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
+            var _dtxt = (_legDly > 0) ? ('בעוד ~' + _legDly + ' שניות') : 'לפי ההשהיה שהגדרת';
+            document.getElementById('statusMessage').textContent = 'הופעל ✓ היד פועלת. הרגל תיפעל ' + _dtxt + '. לעצירה: כפתור 3 על הצמיד, או התחבר מחדש ואז עצור.';
             document.getElementById('errorMessage').style.display = 'none';
         } else {
             document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
