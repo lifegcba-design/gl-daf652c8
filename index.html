@@ -3165,7 +3165,14 @@
             await getCharacteristic(legService, charUuidPulseNumber, 'Leg Pulse Number', (c) => legCharPulseNumber = c);
             await getCharacteristic(legService, charUuidVibrationDuration, 'Leg Vibration Duration', (c) => legCharVibrationDuration = c);
             await getCharacteristic(legService, charUuidStartStop, 'Leg Start/Stop', (c) => legCharStart = c);
-            if (legMacDetected) nmptLegMac = legMacDetected.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+            // קריאת פרמטרי הרגל הנוכחיים למילוי השדות (כדי שהלקוח יראה מה יש ולא ידרוס בטעות)
+            try {
+                if (legCharVibratePower) document.getElementById('legVibratePower').value = new DataView((await legCharVibratePower.readValue()).buffer).getUint8(0);
+                if (legCharPulseInterval) document.getElementById('legPulseInterval').value = new DataView((await legCharPulseInterval.readValue()).buffer).getUint16(0, true);
+                if (legCharVibrationDuration) document.getElementById('legVibrationDuration').value = new DataView((await legCharVibrationDuration.readValue()).buffer).getUint16(0, true);
+                var _lpnHand = document.getElementById('pulseNumber'); var _lpnLeg = document.getElementById('legPulseNumber');
+                if (_lpnHand && _lpnLeg) _lpnLeg.value = _lpnHand.value;  // כמות = יד
+            } catch (e) { console.warn('leg params read failed:', e); }
             var s = document.getElementById('nmptLegStatus');
             if (s) {
                 s.textContent = 'מחובר · ' + formatMacDisplay_(nmptLegMac || '');
