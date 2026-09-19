@@ -2621,6 +2621,7 @@
             // 1.0.72: מאפיין פרמטרי רגל (אופציונלי — קושחה ישנה לא תכיל אותו)
             try { charLegParams = await service.getCharacteristic(charUuidLegParams); }
             catch (e) { charLegParams = null; console.warn('legParams char missing (fw<1.0.72)'); }
+            showAndPopulateLegParams_();  // 1.0.72: הצג מקטע פרמטרי רגל אם הקושחה תומכת
 
             // Get OTA Service and Characteristics (now using lowercase UUID constants)
             otaService = await server.getPrimaryService(otaServiceUuid);
@@ -3149,10 +3150,10 @@
         var el = document.getElementById('lp_status');
         if (el) { el.textContent = msg; el.style.color = isErr ? '#c0392b' : '#1e8449'; }
     }
-    async function showAndPopulateLegParams_(dual) {
+    async function showAndPopulateLegParams_() {
         var sec = document.getElementById('legParamsSection');
         if (!sec) return;
-        if (!dual || !charLegParams) { sec.style.display = 'none'; return; }
+        if (!charLegParams) { sec.style.display = 'none'; return; }  // 1.0.72: מוצג לכל צמיד שתומך
         try {
             var dv = new DataView((await charLegParams.readValue()).buffer);
             if (dv.byteLength >= 5) {
@@ -3189,8 +3190,8 @@
         if (delayInput) delayInput.value = nmptLegDelaySec;
         // לקוח: יד-בלבד — לא נוגע בחיבורי רגל/צימוד. הרגל מקבלת פרמטרים+START מהיד ב-ESP-NOW.
         if (panel) panel.classList.remove('is-visible');
-        // 1.0.72: מקטע פרמטרי רגל (דרך היד) — מוצג לזוגי עם קושחה תומכת
-        showAndPopulateLegParams_(nmptMode === 'DUAL');
+        // 1.0.72: מקטע פרמטרי רגל (דרך היד)
+        showAndPopulateLegParams_();
         var banner = document.getElementById('nmptDualBanner');
         if (banner) {
             banner.innerHTML = (nmptMode === 'DUAL')
