@@ -1344,6 +1344,7 @@
     let _isInventoryMode = false; // true כשהצמיד המחובר הוא ממלאי ולא רשום ללקוח
     let _bleConnecting = false;   // true במהלך connectBLE — מונע איפוס UI מ-disconnect race
     let _autoDisconnectForLeg_ = false;   // אחרי START בלקוח: מנתקים כדי שהיד תשלח ESP-NOW לרגל (C6: אין BLE+ESP-NOW יחד)
+    let _autoDisconnectForStop_ = false;  // 1.0.74: אחרי עצירה — מנתקים כדי שהיד תשלח STOP לרגל
     let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
     let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
     let _otaEndCommandSent = false;
@@ -2404,12 +2405,14 @@
             return;
         }
 
-        // ניתוק יזום אחרי START (לקוח) — הסשן מתחיל, לא נגמר: לא לרשום AUTO_STOP, והודעה ידידותית
+        // ניתוק יזום אחרי START/STOP (לקוח) — לא לרשום AUTO_STOP, והודעה ידידותית
         var _autoStartDisc = _autoDisconnectForLeg_;
+        var _autoStopDisc = _autoDisconnectForStop_;
         _autoDisconnectForLeg_ = false;
+        _autoDisconnectForStop_ = false;
 
         // שליחת לוג אוטומטית אם הסשן היה פעיל (הצמיד נכנס לשינה אחרי סיום)
-        if (sessionWasActive && device && !_sessionEndSent && !_autoStartDisc) {
+        if (sessionWasActive && device && !_sessionEndSent && !_autoStartDisc && !_autoStopDisc) {
             console.log("Session was active when disconnected - sending AUTO_STOP log");
             sendSessionLogToServer("AUTO_STOP");
         }
@@ -2419,6 +2422,9 @@
             var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
             var _dtxt = (_legDly > 0) ? ('בעוד ~' + _legDly + ' שניות') : 'לפי ההשהיה שהגדרת';
             document.getElementById('statusMessage').textContent = 'הופעל ✓ היד פועלת. הרגל תיפעל ' + _dtxt + '. לעצירה: כפתור 3 על הצמיד, או התחבר מחדש ואז עצור.';
+            document.getElementById('errorMessage').style.display = 'none';
+        } else if (_autoStopDisc) {
+            document.getElementById('statusMessage').textContent = 'נעצר ✓ היד והרגל נעצרו.';
             document.getElementById('errorMessage').style.display = 'none';
         } else {
             document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
@@ -3120,6 +3126,13 @@
 
                 // After requesting stop from the bracelet, log this session end to Google Sheets (Apps Script)
                 sendSessionLogToServer("MANUAL_STOP");
+                // 1.0.74: אם זוגי (מקטע רגל מוצג) — מנתקים כדי שהיד תשלח STOP לרגל (C6). היד כבר עצרה מיד.
+                var _lpsStop = document.getElementById('legParamsSection');
+                if (_lpsStop && _lpsStop.style.display === 'block') {
+                    setScenarioStatus_('נעצר ✓ מנתק כדי לעצור את הרגל...', false);
+                    _autoDisconnectForStop_ = true;
+                    setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 500);
+                }
             } else {
                 console.warn('charStop characteristic is not available. Cannot stop scenario.');
             }
