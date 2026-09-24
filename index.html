@@ -1201,8 +1201,9 @@
                 <input type="number" id="lp_interval" min="100" max="5000" value="1000">
                 <label for="lp_duration">Vibration Duration (רגל, ms):</label>
                 <input type="number" id="lp_duration" min="100" max="2000" value="400">
-                <label for="lp_delay">מתי נדלקת הרגל (שניות אחרי היד):</label>
-                <input type="number" id="lp_delay" min="1" max="3600" value="20">
+                <label for="lp_delay">⏸️ זמן הפסקה בין יד לרגל (שניות, 2-10):</label>
+                <input type="number" id="lp_delay" min="2" max="10" value="3">
+                <small class="advanced-note">היד עושה את הפולסים שלה → הפסקה זו → הרגל. אף פעם לא יחד.</small>
                 <button type="button" onclick="writeLegParamsToHand_()"><i class="fas fa-save"></i> שמור פרמטרי רגל</button>
                 <small class="advanced-note">כמות הרטטים של הרגל = כמו היד. הערכים נשלחים לרגל בהפעלה הבאה (דרך היד).</small>
                 <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
@@ -3193,7 +3194,12 @@
                     document.getElementById('lp_power').value = dv.getUint8(0);
                     document.getElementById('lp_interval').value = dv.getUint16(1, true);
                     document.getElementById('lp_duration').value = dv.getUint16(3, true);
-                    if (dv.byteLength >= 7) document.getElementById('lp_delay').value = dv.getUint16(5, true);
+                    if (dv.byteLength >= 7) {
+                        var _storedDly = dv.getUint16(5, true);
+                        var _hb = Math.ceil(((parseInt(document.getElementById('pulseNumber').value, 10) || 1) * (parseInt(document.getElementById('pulseInterval').value, 10) || 1000)) / 1000);
+                        var _pz = _storedDly - _hb;
+                        document.getElementById('lp_delay').value = (_pz >= 2 && _pz <= 10) ? _pz : 3;
+                    }
                 }
             }
         } catch (e) { console.warn('read legParams failed', e); }
@@ -3204,14 +3210,18 @@
         var pw = parseInt(document.getElementById('lp_power').value, 10) || 195;
         var itv = parseInt(document.getElementById('lp_interval').value, 10) || 1000;
         var dur = parseInt(document.getElementById('lp_duration').value, 10) || 400;
-        var dly = parseInt(document.getElementById('lp_delay').value, 10) || 20;
+        // זמן הפסקה בין יד לרגל (2-10ש') → הרגל מתחילה אחרי התקף היד + ההפסקה → אף פעם לא יחד
+        var pauseSec = parseInt(document.getElementById('lp_delay').value, 10) || 3;
+        if (pauseSec < 2) pauseSec = 2; if (pauseSec > 10) pauseSec = 10;
+        var handBurstSec = Math.ceil(((parseInt(document.getElementById('pulseNumber').value, 10) || 1) * (parseInt(document.getElementById('pulseInterval').value, 10) || 1000)) / 1000);
+        var dly = handBurstSec + pauseSec;
         if (pw < 1) pw = 1; if (pw > 255) pw = 255;
         if (dly < 1) dly = 1; if (dly > 3600) dly = 3600;
         var buf = new ArrayBuffer(7); var dv = new DataView(buf);
         dv.setUint8(0, pw); dv.setUint16(1, itv, true); dv.setUint16(3, dur, true); dv.setUint16(5, dly, true);
         try {
             await runGattOp(async function () { await charLegParams.writeValue(buf); });
-            setLegParamsStatus_('נשמר ✓ הרגל תקבל בהפעלה הבאה (עוצמה ' + pw + ', מרווח ' + itv + ', משך ' + dur + ', השהיה ' + dly + 'ש\').', false);
+            setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. היד רוטטת ~' + handBurstSec + 'ש\' → הפסקה → הרגל (מתחילה ' + dly + 'ש\' אחרי היד) — בלי חפיפה.', false);
         } catch (e) { setLegParamsStatus_('שגיאה: ' + (e && e.message ? e.message : e), true); }
     }
 
