@@ -1196,15 +1196,15 @@
             <div id="legParamsSection" style="display:none; border:1px solid #d0d7de; border-radius:10px; padding:12px; margin:12px 0; background:#f6f8fa;">
                 <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי צמיד משני (דרך הראשי)</h3>
                 <label for="lp_power">Vibrate Power (משני):</label>
-                <input type="number" id="lp_power" min="160" max="255" value="195">
+                <input type="number" id="lp_power" min="160" max="255" value="195" onchange="writeLegParamsToHand_()">
                 <label for="lp_interval">Pulse Interval (משני, ms):</label>
-                <input type="number" id="lp_interval" min="100" max="5000" value="1000">
+                <input type="number" id="lp_interval" min="100" max="5000" value="1000" onchange="writeLegParamsToHand_()">
                 <label for="lp_duration">Vibration Duration (משני, ms):</label>
-                <input type="number" id="lp_duration" min="100" max="2000" value="400">
+                <input type="number" id="lp_duration" min="100" max="2000" value="400" onchange="writeLegParamsToHand_()">
                 <label for="lp_delay">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
-                <input type="number" id="lp_delay" min="2" max="10" value="3">
+                <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()">
                 <small class="advanced-note">להפעלה רגילה (START): הראשי עושה את הפולסים שלו → הפסקה זו → המשני. אף פעם לא יחד. ב-NMPT לא בשימוש — שם קובעים זמני בלוקים.</small>
-                <button type="button" onclick="writeLegParamsToHand_()"><i class="fas fa-save"></i> שמור פרמטרי משני</button>
+                <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
                 <small class="advanced-note">כמות הרטטים של המשני = כמו הראשי. הערכים נשלחים למשני בהפעלה הבאה (דרך הראשי).</small>
                 <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
             </div>
@@ -1213,13 +1213,14 @@
             <div id="nmptBlockSection" style="display:none; border:1px solid #c9b8f5; border-radius:10px; padding:12px; margin:12px 0; background:#f5f1ff;">
                 <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-exchange-alt"></i> NMPT — סירוגין ראשי / משני</h3>
                 <label for="nb_primary">⏱️ זמן עבודה צמיד ראשי (שניות):</label>
-                <input type="number" id="nb_primary" min="1" max="600" value="6">
+                <input type="number" id="nb_primary" min="1" max="600" value="6" onchange="nmptBlockCmd_(0)">
                 <label for="nb_secondary">⏱️ זמן עבודה צמיד משני (שניות):</label>
-                <input type="number" id="nb_secondary" min="1" max="600" value="6">
+                <input type="number" id="nb_secondary" min="1" max="600" value="6" onchange="nmptBlockCmd_(0)">
+                <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
                 <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>כמות הפולסים (Pulse Number)</strong> שבהגדרות הבסיס, ואז נעצר.</small>
                 <small class="advanced-note">ראשי פועל → נכבה → משני פועל → נכבה → חוזר. בכל רגע רק צמיד אחד רוטט. כל צמיד רוטט לפי הפרמטרים שלו (ראשי — הפרמטרים הראשיים; משני — פרמטרי הצמיד המשני למעלה).</small>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-                    <button type="button" onclick="nmptBlockCmd_(0)"><i class="fas fa-save"></i> SAVE</button>
+                    
                     <button type="button" onclick="nmptBlockCmd_(1)" style="background:#1e8449;"><i class="fas fa-play"></i> START</button>
                     <button type="button" onclick="nmptBlockCmd_(2)" style="background:#c0392b;"><i class="fas fa-stop"></i> STOP</button>
                 </div>
