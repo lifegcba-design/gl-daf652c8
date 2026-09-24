@@ -1201,9 +1201,9 @@
                 <input type="number" id="lp_interval" min="100" max="5000" value="1000" onchange="writeLegParamsToHand_()">
                 <label for="lp_duration">Vibration Duration (משני, ms):</label>
                 <input type="number" id="lp_duration" min="100" max="2000" value="400" onchange="writeLegParamsToHand_()">
-                <label for="lp_delay">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
-                <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()">
-                <small class="advanced-note">להפעלה רגילה (START): הראשי עושה את הפולסים שלו → הפסקה זו → המשני. אף פעם לא יחד. ב-NMPT לא בשימוש — שם קובעים זמני בלוקים.</small>
+                <label for="lp_delay" style="display:none">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
+                <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()" style="display:none">
+                
                 <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
                 <small class="advanced-note">כמות הרטטים של המשני = כמו הראשי. הערכים נשלחים למשני בהפעלה הבאה (דרך הראשי).</small>
                 <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
@@ -1218,6 +1218,7 @@
                 <input type="number" id="nb_secondary" min="1" max="600" value="6" onchange="nmptBlockCmd_(0)">
                 <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
                 <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>כמות הפולסים (Pulse Number)</strong> שבהגדרות הבסיס, ואז נעצר.</small>
+                <small class="advanced-note">👥 עם שני צמידים <strong>כל הפעלה היא סירוגין</strong> — כפתור "התחל", כפתור 3 בראשי, או START כאן. צמיד יחיד פועל רגיל.</small>
                 <small class="advanced-note">ראשי פועל → נכבה → משני פועל → נכבה → חוזר. בכל רגע רק צמיד אחד רוטט. כל צמיד רוטט לפי הפרמטרים שלו (ראשי — הפרמטרים הראשיים; משני — פרמטרי הצמיד המשני למעלה).</small>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
                     
@@ -2482,7 +2483,7 @@
             var _lpD = document.getElementById('lp_delay');
             var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
             var _dtxt = (_legDly > 0) ? ('בהפסקה של ' + _legDly + ' שניות אחרי שהראשי מסיים') : 'לפי ההשהיה שהגדרת';
-            document.getElementById('statusMessage').textContent = 'הופעל ✓ הראשי פועל. המשני יתחיל ' + _dtxt + '. מתחבר מחדש אוטומטית בעוד כמה שניות...';
+            document.getElementById('statusMessage').textContent = 'הופעל ✓ ראשי ומשני מתחלפים (סירוגין) — מתחבר מחדש אוטומטית בעוד כמה שניות...';
             document.getElementById('errorMessage').style.display = 'none';
             scheduleAutoReconnect_(device, 6000);   // אחרי ה-burst (5ש') שמעיר את המשני
         } else if (_autoStopDisc) {
