@@ -1194,19 +1194,36 @@
 
             <!-- 1.0.72: פרמטרי רגל דרך היד (מוסתר עד חיבור לזוגי עם קושחה תומכת) -->
             <div id="legParamsSection" style="display:none; border:1px solid #d0d7de; border-radius:10px; padding:12px; margin:12px 0; background:#f6f8fa;">
-                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי רגל (דרך היד)</h3>
-                <label for="lp_power">Vibrate Power (רגל):</label>
+                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי צמיד משני (דרך הראשי)</h3>
+                <label for="lp_power">Vibrate Power (משני):</label>
                 <input type="number" id="lp_power" min="160" max="255" value="195">
-                <label for="lp_interval">Pulse Interval (רגל, ms):</label>
+                <label for="lp_interval">Pulse Interval (משני, ms):</label>
                 <input type="number" id="lp_interval" min="100" max="5000" value="1000">
-                <label for="lp_duration">Vibration Duration (רגל, ms):</label>
+                <label for="lp_duration">Vibration Duration (משני, ms):</label>
                 <input type="number" id="lp_duration" min="100" max="2000" value="400">
-                <label for="lp_delay">⏸️ זמן הפסקה בין יד לרגל (שניות, 2-10):</label>
+                <label for="lp_delay">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
                 <input type="number" id="lp_delay" min="2" max="10" value="3">
-                <small class="advanced-note">היד עושה את הפולסים שלה → הפסקה זו → הרגל. אף פעם לא יחד.</small>
-                <button type="button" onclick="writeLegParamsToHand_()"><i class="fas fa-save"></i> שמור פרמטרי רגל</button>
-                <small class="advanced-note">כמות הרטטים של הרגל = כמו היד. הערכים נשלחים לרגל בהפעלה הבאה (דרך היד).</small>
+                <small class="advanced-note">הראשי עושה את הפולסים שלו → הפסקה זו → המשני. אף פעם לא יחד.</small>
+                <button type="button" onclick="writeLegParamsToHand_()"><i class="fas fa-save"></i> שמור פרמטרי משני</button>
+                <small class="advanced-note">כמות הרטטים של המשני = כמו הראשי. הערכים נשלחים למשני בהפעלה הבאה (דרך הראשי).</small>
                 <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
+            </div>
+
+            <!-- 1.0.76: NMPT — סירוגין בלוקי זמן ראשי/משני (מוצג רק לראשי בזוגי עם קושחה 1.0.76+) -->
+            <div id="nmptBlockSection" style="display:none; border:1px solid #c9b8f5; border-radius:10px; padding:12px; margin:12px 0; background:#f5f1ff;">
+                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-exchange-alt"></i> NMPT — סירוגין ראשי / משני</h3>
+                <label for="nb_primary">⏱️ זמן עבודה צמיד ראשי (שניות):</label>
+                <input type="number" id="nb_primary" min="1" max="600" value="6">
+                <label for="nb_secondary">⏱️ זמן עבודה צמיד משני (שניות):</label>
+                <input type="number" id="nb_secondary" min="1" max="600" value="6">
+                <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>כמות הפולסים (Pulse Number)</strong> שבהגדרות הבסיס, ואז נעצר.</small>
+                <small class="advanced-note">ראשי פועל → נכבה → משני פועל → נכבה → חוזר. בכל רגע רק צמיד אחד רוטט. כל צמיד רוטט לפי הפרמטרים שלו (ראשי — הפרמטרים הראשיים; משני — פרמטרי הצמיד המשני למעלה).</small>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                    <button type="button" onclick="nmptBlockCmd_(0)"><i class="fas fa-save"></i> SAVE</button>
+                    <button type="button" onclick="nmptBlockCmd_(1)" style="background:#1e8449;"><i class="fas fa-play"></i> START</button>
+                    <button type="button" onclick="nmptBlockCmd_(2)" style="background:#c0392b;"><i class="fas fa-stop"></i> STOP</button>
+                </div>
+                <div id="nb_status" style="margin-top:6px;font-weight:600;"></div>
             </div>
 
             <button onclick="toggleAdvancedOptions()"><i class="fas fa-cogs"></i> אפשרויות מתקדמות</button>
@@ -1346,6 +1363,7 @@
     let _bleConnecting = false;   // true במהלך connectBLE — מונע איפוס UI מ-disconnect race
     let _autoDisconnectForLeg_ = false;   // אחרי START בלקוח: מנתקים כדי שהיד תשלח ESP-NOW לרגל (C6: אין BLE+ESP-NOW יחד)
     let _autoDisconnectForStop_ = false;  // 1.0.74: אחרי עצירה — מנתקים כדי שהיד תשלח STOP לרגל
+    let _autoDisconnectForNmpt_ = 0;      // 1.0.76: אחרי NMPT START(1)/STOP(2) — מנתקים כדי שהראשי יסנכרן/יעצור את המשני
     let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
     let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
     let _otaEndCommandSent = false;
@@ -2409,16 +2427,24 @@
         // ניתוק יזום אחרי START/STOP (לקוח) — לא לרשום AUTO_STOP, והודעה ידידותית
         var _autoStartDisc = _autoDisconnectForLeg_;
         var _autoStopDisc = _autoDisconnectForStop_;
+        var _autoNmptDisc = _autoDisconnectForNmpt_;
         _autoDisconnectForLeg_ = false;
         _autoDisconnectForStop_ = false;
+        _autoDisconnectForNmpt_ = 0;
 
         // שליחת לוג אוטומטית אם הסשן היה פעיל (הצמיד נכנס לשינה אחרי סיום)
-        if (sessionWasActive && device && !_sessionEndSent && !_autoStartDisc && !_autoStopDisc) {
+        if (sessionWasActive && device && !_sessionEndSent && !_autoStartDisc && !_autoStopDisc && !_autoNmptDisc) {
             console.log("Session was active when disconnected - sending AUTO_STOP log");
             sendSessionLogToServer("AUTO_STOP");
         }
 
-        if (_autoStartDisc) {
+        if (_autoNmptDisc === 1) {
+            document.getElementById('statusMessage').textContent = 'NMPT הופעל ✓ הראשי והמשני מתחלפים לפי הזמנים שהגדרת. לעצירה: כפתור 3 על הראשי, או התחבר מחדש ולחץ STOP.';
+            document.getElementById('errorMessage').style.display = 'none';
+        } else if (_autoNmptDisc === 2) {
+            document.getElementById('statusMessage').textContent = 'NMPT נעצר ✓ הראשי והמשני כבויים.';
+            document.getElementById('errorMessage').style.display = 'none';
+        } else if (_autoStartDisc) {
             var _lpD = document.getElementById('lp_delay');
             var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
             var _dtxt = (_legDly > 0) ? ('בעוד ~' + _legDly + ' שניות') : 'לפי ההשהיה שהגדרת';
@@ -3174,6 +3200,8 @@
     async function showAndPopulateLegParams_() {
         var sec = document.getElementById('legParamsSection');
         if (!sec) return;
+        var nsec = document.getElementById('nmptBlockSection');  // 1.0.76
+        if (nsec) nsec.style.display = 'none';
         if (!charLegParams) { sec.style.display = 'none'; return; }  // 1.0.72: מוצג לכל צמיד שתומך
         // 1.0.73: מוצג רק כשהצמיד המחובר הוא יד בזוגי (role=1 + configMode=DUAL) — נקרא מהצמיד עצמו (אמין)
         var _configKnown = false, _isHandDual = false;
@@ -3200,10 +3228,48 @@
                         var _pz = _storedDly - _hb;
                         document.getElementById('lp_delay').value = (_pz >= 2 && _pz <= 10) ? _pz : 3;
                     }
+                    // 1.0.76: 13B = קושחה תומכת NMPT → הגדרות שמורות + הצגת המקטע (ישנה לא תקבל פקודת 8B)
+                    if (dv.byteLength >= 13 && nsec) {
+                        document.getElementById('nb_primary').value = dv.getUint16(7, true) || 6;
+                        document.getElementById('nb_secondary').value = dv.getUint16(9, true) || 6;
+                        nsec.style.display = 'block';
+                    }
                 }
             }
         } catch (e) { console.warn('read legParams failed', e); }
         sec.style.display = 'block';
+    }
+
+    // 1.0.76: NMPT — סירוגין בלוקי זמן. נכתב ל-legParamsChar: 8B 'N', cmd(0=SAVE,1=START,2=STOP), primaryS, secondaryS, cycles (LE)
+    function setNmptBlockStatus_(msg, isErr) {
+        var el = document.getElementById('nb_status');
+        if (el) { el.textContent = msg; el.style.color = isErr ? '#c0392b' : '#1e8449'; }
+    }
+    async function nmptBlockCmd_(cmd) {
+        if (!charLegParams) { setNmptBlockStatus_('קושחה ישנה — עדכן ל-1.0.76.', true); return; }
+        var p = parseInt(document.getElementById('nb_primary').value, 10) || 6;
+        var s = parseInt(document.getElementById('nb_secondary').value, 10) || 6;
+        if (p < 1) p = 1; if (p > 600) p = 600;
+        if (s < 1) s = 1; if (s > 600) s = 600;
+        var pn = parseInt(document.getElementById('pulseNumber').value, 10) || 0;
+        var buf = new ArrayBuffer(8); var dv = new DataView(buf);
+        dv.setUint8(0, 78); dv.setUint8(1, cmd); dv.setUint16(2, p, true); dv.setUint16(4, s, true); dv.setUint16(6, 0, true);  // 6-7 שמורים
+        try {
+            // START: מוודאים שהראשי מחזיק את הגדרות הבסיס שעל המסך (כמות פולסים = משך הריצה)
+            if (cmd === 1) {
+                await updateBLEValue('vibratePower');
+                await updateBLEValue('pulseInterval');
+                await updateBLEValue('pulseNumber');
+                await updateBLEValue('vibrationDuration');
+            }
+            await runGattOp(async function () { await charLegParams.writeValue(buf); });
+            var desc = 'ראשי ' + p + 'ש\' / משני ' + s + 'ש\' / ' + pn + ' פולסים לכל צמיד';
+            if (cmd === 0) { setNmptBlockStatus_('נשמר ✓ ' + desc, false); return; }
+            // START/STOP: מנתקים — C6 חוסם ESP-NOW בזמן BLE; הראשי מסנכרן/עוצר את המשני אחרי הניתוק
+            _autoDisconnectForNmpt_ = cmd;
+            setNmptBlockStatus_(cmd === 1 ? ('הופעל ✓ ' + desc + ' — מנתק כדי שהראשי יסנכרן את המשני...') : 'נעצר ✓ מנתק כדי לעצור את המשני...', false);
+            setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 500);
+        } catch (e) { setNmptBlockStatus_('שגיאה: ' + (e && e.message ? e.message : e), true); }
     }
     async function writeLegParamsToHand_() {
         if (!charLegParams) { setLegParamsStatus_('קושחה ישנה — עדכן ל-1.0.72.', true); return; }
