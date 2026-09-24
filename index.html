@@ -1382,6 +1382,19 @@
     let _autoDisconnectForLeg_ = false;   // אחרי START בלקוח: מנתקים כדי שהיד תשלח ESP-NOW לרגל (C6: אין BLE+ESP-NOW יחד)
     let _autoDisconnectForStop_ = false;  // 1.0.74: אחרי עצירה — מנתקים כדי שהיד תשלח STOP לרגל
     let _autoDisconnectForNmpt_ = 0;      // 1.0.76: אחרי NMPT START(1)/STOP(2) — מנתקים כדי שהראשי יסנכרן/יעצור את המשני
+    let _reconnectDevice_ = null;         // חיבור מחדש אוטומטי לאותו צמיד אחרי ניתוק יזום (בלי חלון בחירה)
+
+    // ניתוק יזום קצר (C6: ESP-NOW רק בלי BLE) ואז חיבור מחדש אוטומטי. ms ≥ משך ה-burst כדי לא לקטוע אותו.
+    function scheduleAutoReconnect_(dev, ms) {
+        if (!dev) return;
+        _reconnectDevice_ = dev;
+        setTimeout(function () {
+            if (_reconnectDevice_ && !(device && device.gatt && device.gatt.connected)) {
+                document.getElementById('statusMessage').textContent = 'מתחבר מחדש לצמיד...';
+                connectBLE(false).catch(function () { });
+            } else { _reconnectDevice_ = null; }
+        }, ms);
+    }
     let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
     let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
     let _otaEndCommandSent = false;
@@ -2457,20 +2470,24 @@
         }
 
         if (_autoNmptDisc === 1) {
-            document.getElementById('statusMessage').textContent = 'NMPT הופעל ✓ הראשי והמשני מתחלפים לפי הזמנים שהגדרת. לעצירה: כפתור 3 על הראשי, או התחבר מחדש ולחץ STOP.';
+            document.getElementById('statusMessage').textContent = 'NMPT הופעל ✓ הראשי מסנכרן את המשני — מתחבר מחדש אוטומטית בעוד כמה שניות...';
             document.getElementById('errorMessage').style.display = 'none';
+            scheduleAutoReconnect_(device, 4500);
         } else if (_autoNmptDisc === 2) {
-            document.getElementById('statusMessage').textContent = 'NMPT נעצר ✓ הראשי והמשני כבויים.';
+            document.getElementById('statusMessage').textContent = 'NMPT נעצר ✓ הראשי והמשני כבויים — מתחבר מחדש אוטומטית...';
             document.getElementById('errorMessage').style.display = 'none';
+            scheduleAutoReconnect_(device, 2500);
         } else if (_autoStartDisc) {
             var _lpD = document.getElementById('lp_delay');
             var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
-            var _dtxt = (_legDly > 0) ? ('בעוד ~' + _legDly + ' שניות') : 'לפי ההשהיה שהגדרת';
-            document.getElementById('statusMessage').textContent = 'הופעל ✓ היד פועלת. הרגל תיפעל ' + _dtxt + '. לעצירה: כפתור 3 על הצמיד, או התחבר מחדש ואז עצור.';
+            var _dtxt = (_legDly > 0) ? ('בהפסקה של ' + _legDly + ' שניות אחרי שהראשי מסיים') : 'לפי ההשהיה שהגדרת';
+            document.getElementById('statusMessage').textContent = 'הופעל ✓ הראשי פועל. המשני יתחיל ' + _dtxt + '. מתחבר מחדש אוטומטית בעוד כמה שניות...';
             document.getElementById('errorMessage').style.display = 'none';
+            scheduleAutoReconnect_(device, 6000);   // אחרי ה-burst (5ש') שמעיר את המשני
         } else if (_autoStopDisc) {
-            document.getElementById('statusMessage').textContent = 'נעצר ✓ היד והרגל נעצרו.';
+            document.getElementById('statusMessage').textContent = 'נעצר ✓ הראשי והמשני נעצרו — מתחבר מחדש אוטומטית...';
             document.getElementById('errorMessage').style.display = 'none';
+            scheduleAutoReconnect_(device, 6000);
         } else {
             document.getElementById('statusMessage').textContent = 'החיבור לצמיד נותק.';
             document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
@@ -2611,7 +2628,7 @@
         try {
             if (!navigator.bluetooth || !isSecureBleContext_()) {
                 document.getElementById('errorMessage').innerHTML =
-                    'Web Bluetooth לא זמין. פתחו את הקובץ המקומי ב-Chrome דרך <strong>open-local.bat</strong> ' +
+                    'חיבור בלוטות\' לא זמין. פתחו את הקובץ המקומי ב-Chrome דרך <strong>open-local.bat</strong> ' +
                     '(file:///…/Goldenlife.html). שרת מקומי מיועד רק ל-Goldenlife_Lab.';
                 document.getElementById('errorMessage').style.display = 'block';
                 return;
@@ -2620,7 +2637,8 @@
             document.getElementById('errorMessage').style.display = 'none';
             document.getElementById('statusMessage').textContent = "מתחבר...";
 
-            device = await pickBleDevice_();
+            if (_reconnectDevice_) { device = _reconnectDevice_; _reconnectDevice_ = null; }  // חיבור מחדש אוטומטי
+            else device = await pickBleDevice_();
 
             // Add the disconnection event listener immediately after getting the device
             device.addEventListener('gattserverdisconnected', handleBleDisconnected);
@@ -3328,6 +3346,7 @@
         try {
             await runGattOp(async function () { await charLegParams.writeValue(buf); });
             try { localStorage.setItem('gl_pause_' + (nmptHandMac || ''), String(pauseSec)); } catch (e) { }
+            ['legDelay', 'nmptLegDelayInput'].forEach(function (id) { var _el = document.getElementById(id); if (_el) _el.value = dly; });  // שדה ההשהיה הגולמי מתעדכן — כתיבת תפקיד לא תדרוס
             setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. הראשי רוטט ~' + handBurstSec + 'ש\' → הפסקה → המשני (מתחיל ' + dly + 'ש\' אחרי הראשי) — בלי חפיפה.', false);
         } catch (e) { setLegParamsStatus_('שגיאה: ' + heErr_(e), true); }
     }
