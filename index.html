@@ -1335,6 +1335,24 @@
 
     // --- תור פעולות GATT – מונע "GATT operation already in progress" ---
     let gattQueue = Promise.resolve();
+    // הודעות שגיאה למשתמש — בעברית בלבד (Web Bluetooth / GATT / רשת). המקור נרשם ב-console.
+    function heErr_(e) {
+        var m = String((e && (e.message || e.name)) || e || '');
+        var n = String((e && e.name) || '');
+        try { console.warn('error (raw):', m); } catch (x) { }
+        if (/GATT Server is disconnected|disconnected|no longer in range|not connected/i.test(m)) return 'הצמיד מנותק — התחבר מחדש ונסה שוב.';
+        if (/already in progress/i.test(m)) return 'פעולה קודמת עדיין רצה — המתן רגע ונסה שוב.';
+        if (n === 'NotFoundError' || /cancel/i.test(m)) return 'לא נבחר צמיד — נסה שוב.';
+        if (/adapter|Bluetooth is not available|Bluetooth.*(off|disabled)/i.test(m)) return 'הבלוטות\' במכשיר כבוי או לא זמין — הפעל בלוטות\' ונסה שוב.';
+        if (n === 'SecurityError' || /permission|not allowed|user gesture/i.test(m)) return 'אין הרשאה לבלוטות\' — אשר גישה ונסה שוב.';
+        if (n === 'NotSupportedError' || /not supported/i.test(m)) return 'הפעולה לא נתמכת בצמיד או בדפדפן (ייתכן שהקושחה ישנה).';
+        if (n === 'InvalidStateError') return 'הצמיד לא במצב מתאים — התחבר מחדש ונסה שוב.';
+        if (/timeout|timed out/i.test(m)) return 'הצמיד לא הגיב בזמן — נסה שוב.';
+        if (/Failed to fetch|Load failed/i.test(m)) return 'אין חיבור לאינטרנט או לשרת — נסה שוב.';
+        if (n === 'NetworkError' || /GATT operation failed|unknown reason|NetworkError/i.test(m)) return 'התקשורת עם הצמיד נכשלה — קרב את הצמיד ונסה שוב.';
+        return 'אירעה שגיאה — נסה שוב.';
+    }
+
     async function runGattOp(fn) {
         const prev = gattQueue;
         let resolve;
@@ -1623,7 +1641,7 @@
         }
         if (!navigator.bluetooth) {
             banner.className = 'warn';
-            banner.textContent = 'Web Bluetooth לא זמין בדפדפן זה — השתמשו ב-Chrome במחשב.';
+            banner.textContent = 'חיבור בלוטות\' לא זמין בדפדפן זה — השתמשו ב-Chrome (מחשב או אנדרואיד).';
             return;
         }
         banner.className = 'ok';
@@ -2454,7 +2472,7 @@
             document.getElementById('statusMessage').textContent = 'נעצר ✓ היד והרגל נעצרו.';
             document.getElementById('errorMessage').style.display = 'none';
         } else {
-            document.getElementById('statusMessage').textContent = "Connection Lost. Please reconnect.";
+            document.getElementById('statusMessage').textContent = 'החיבור לצמיד נותק.';
             document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
             document.getElementById('errorMessage').style.display = 'block';
         }
@@ -2770,7 +2788,7 @@
                 document.getElementById('errorMessage').textContent = "בחירת המכשיר בוטלה. אנא נסה שוב.";
             } else {
                 console.error('BLE connection failed:', error);
-                document.getElementById('errorMessage').textContent = `חיבור BLE נכשל: ${error.message}`;
+                document.getElementById('errorMessage').textContent = 'החיבור לצמיד נכשל: ' + heErr_(error);
             }
             document.getElementById('errorMessage').style.display = 'block';
             document.getElementById('statusMessage').textContent = "התחברות נכשלה.";
@@ -3132,7 +3150,7 @@
             }
         } catch (error) {
             console.error("? Failed to send start scenario command:", error);
-            setScenarioStatus_('שגיאה בשליחת התחלה: ' + (error && error.message ? error.message : error), true);
+            setScenarioStatus_('שגיאה בשליחת התחלה: ' + heErr_(error), true);
         }
     }
 
@@ -3290,7 +3308,7 @@
             _autoDisconnectForNmpt_ = cmd;
             setNmptBlockStatus_(cmd === 1 ? ('הופעל ✓ ' + desc + ' — מנתק כדי שהראשי יסנכרן את המשני...') : 'נעצר ✓ מנתק כדי לעצור את המשני...', false);
             setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 500);
-        } catch (e) { setNmptBlockStatus_('שגיאה: ' + (e && e.message ? e.message : e), true); }
+        } catch (e) { setNmptBlockStatus_('שגיאה: ' + heErr_(e), true); }
     }
     async function writeLegParamsToHand_() {
         if (!charLegParams) { setLegParamsStatus_('קושחה ישנה — עדכן ל-1.0.72.', true); return; }
@@ -3311,7 +3329,7 @@
             await runGattOp(async function () { await charLegParams.writeValue(buf); });
             try { localStorage.setItem('gl_pause_' + (nmptHandMac || ''), String(pauseSec)); } catch (e) { }
             setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. היד רוטטת ~' + handBurstSec + 'ש\' → הפסקה → הרגל (מתחילה ' + dly + 'ש\' אחרי היד) — בלי חפיפה.', false);
-        } catch (e) { setLegParamsStatus_('שגיאה: ' + (e && e.message ? e.message : e), true); }
+        } catch (e) { setLegParamsStatus_('שגיאה: ' + heErr_(e), true); }
     }
 
     function applyNmptMode_(mode, legDelaySec, legMac) {
@@ -3347,7 +3365,7 @@
     async function connectLegDevice() {
         try {
             if (!navigator.bluetooth || !isSecureBleContext_()) {
-                setNmptDualStatus_('Web Bluetooth לא זמין.', true); return;
+                setNmptDualStatus_('חיבור בלוטות\' לא זמין בדפדפן הזה.', true); return;
             }
             setNmptDualStatus_('בחרו את צמיד הרגל...', false);
             legDevice = await pickBleDevice_();
@@ -3384,7 +3402,7 @@
             setNmptDualStatus_('צמיד הרגל מחובר.', false);
         } catch (e) {
             console.error('connectLegDevice failed:', e);
-            setNmptDualStatus_('חיבור צמיד הרגל נכשל: ' + (e && e.message ? e.message : e), true);
+            setNmptDualStatus_('חיבור הצמיד המשני נכשל: ' + heErr_(e), true);
         }
     }
 
@@ -3483,12 +3501,12 @@
                     setNmptDualStatus_('שני הצמידים פעילים (יד + רגל).', false);
                 } catch (e) {
                     console.error('Leg activation failed:', e);
-                    setNmptDualStatus_('הפעלת הרגל נכשלה: ' + (e && e.message ? e.message : e), true);
+                    setNmptDualStatus_('הפעלת הצמיד המשני נכשלה: ' + heErr_(e), true);
                 }
             }, legDelay * 1000);
         } catch (e) {
             console.error('saveAndActivateDual failed:', e);
-            setNmptDualStatus_('שגיאה: ' + (e && e.message ? e.message : e), true);
+            setNmptDualStatus_('שגיאה: ' + heErr_(e), true);
         }
     }
 
@@ -3505,7 +3523,7 @@
             sendSessionLogToServer("MANUAL_STOP");
         } catch (e) {
             console.error('stopBoth failed:', e);
-            setNmptDualStatus_('שגיאה בעצירה: ' + (e && e.message ? e.message : e), true);
+            setNmptDualStatus_('שגיאה בעצירה: ' + heErr_(e), true);
         }
     }
 
@@ -3817,7 +3835,7 @@
                 scheduleOtaRebootGrace_(120000);
                 return;
             }
-            otaStatusMessage.textContent = `עדכון OTA נכשל: ${error.message}`;
+            otaStatusMessage.textContent = 'עדכון OTA נכשל: ' + heErr_(error);
             otaStatusMessage.style.color = 'red';
             const macFail = extractMacFromDeviceName(device ? device.name || '' : '');
             const fn = _pendingManualOtaMeta ? _pendingManualOtaMeta.fileName : '';
@@ -4097,7 +4115,7 @@
                 return;
             }
             clearOtaAutoDismiss_(mac, targetVer);
-            if (otaStatus) otaStatus.textContent = 'OTA \u05e0\u05db\u05e9\u05dc: ' + _otaErr.message;
+            if (otaStatus) otaStatus.textContent = 'OTA \u05e0\u05db\u05e9\u05dc: ' + heErr_(_otaErr);
             if (statusMsg) statusMsg.textContent = '\u05e2\u05d3\u05db\u05d5\u05df \u05e0\u05db\u05e9\u05dc — בחיבור הבא יינסה שוב אוטומטית.';
             if (mac && LOG_WEBAPP_URL) {
                 await postFirmwareUpdateSheetLog(mac, _currentFirmwareVersion, targetVer, '\u05db\u05d9\u05e9\u05dc\u05d5\u05df', String(_otaErr.message || _otaErr));
