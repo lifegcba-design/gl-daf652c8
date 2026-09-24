@@ -3328,7 +3328,7 @@
         try {
             await runGattOp(async function () { await charLegParams.writeValue(buf); });
             try { localStorage.setItem('gl_pause_' + (nmptHandMac || ''), String(pauseSec)); } catch (e) { }
-            setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. היד רוטטת ~' + handBurstSec + 'ש\' → הפסקה → הרגל (מתחילה ' + dly + 'ש\' אחרי היד) — בלי חפיפה.', false);
+            setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. הראשי רוטט ~' + handBurstSec + 'ש\' → הפסקה → המשני (מתחיל ' + dly + 'ש\' אחרי הראשי) — בלי חפיפה.', false);
         } catch (e) { setLegParamsStatus_('שגיאה: ' + heErr_(e), true); }
     }
 
