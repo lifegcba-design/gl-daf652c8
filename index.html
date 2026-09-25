@@ -1127,21 +1127,21 @@
             </h3>
             <h3>תרחישים שנותרו: <span id="remainingScenariosDisplay">--</span></h3>
 
-            <label for="vibratePower">Vibrate Power:</label>
-            <input type="number" id="vibratePower" min="160" max="255" placeholder="Enter Vibrate Power"
+            <label for="vibratePower">עוצמת רטט:</label>
+            <input type="number" id="vibratePower" min="160" max="255" placeholder="הזן עוצמת רטט"
                 onchange="updateBLEValue('vibratePower')">
 
-            <label for="pulseInterval">Pulse Interval (ms):</label>
-            <input type="number" id="pulseInterval" min="100" max="5000" placeholder="Enter Pulse Interval"
+            <label for="pulseInterval">מרווח בין רטטים (מילישניות):</label>
+            <input type="number" id="pulseInterval" min="100" max="5000" placeholder="הזן מרווח בין רטטים"
                 onchange="updateBLEValue('pulseInterval')">
 
 
-            <label for="pulseNumber">Pulse Number:</label>
-            <input type="number" id="pulseNumber" min="1" max="2000" placeholder="Enter Pulse Number"
+            <label for="pulseNumber">מספר רטטים:</label>
+            <input type="number" id="pulseNumber" min="1" max="2000" placeholder="הזן מספר רטטים"
                 onchange="updateBLEValue('pulseNumber')">
 
-            <label for="vibrationDuration">Vibration Duration (ms):</label>
-            <input type="number" id="vibrationDuration" min="100" max="2000" placeholder="Enter Vibration Duration"
+            <label for="vibrationDuration">משך הרטט (מילישניות):</label>
+            <input type="number" id="vibrationDuration" min="100" max="2000" placeholder="הזן משך רטט"
                 onchange="updateBLEValue('vibrationDuration')">
             <button id="startButton" onclick="startScenario()">
                 <i class="fas fa-play-circle"></i> התחל
@@ -1166,14 +1166,14 @@
                         <i class="fas fa-bluetooth-b"></i> חבר את צמיד הרגל
                     </button>
 
-                    <label for="legVibratePower">Vibrate Power (רגל):</label>
+                    <label for="legVibratePower">עוצמת רטט (משני):</label>
                     <input type="number" id="legVibratePower" min="160" max="255" value="195">
-                    <label for="legPulseInterval">Pulse Interval (רגל, ms):</label>
+                    <label for="legPulseInterval">מרווח בין רטטים (משני, מילישניות):</label>
                     <input type="number" id="legPulseInterval" min="100" max="5000" value="1000">
-                    <label for="legPulseNumber">Pulse Number (רגל):</label>
+                    <label for="legPulseNumber">מספר רטטים (משני):</label>
                     <input type="number" id="legPulseNumber" min="1" max="2000" value="60" readonly>
                     <small class="advanced-note">כמות הרטטים זהה ליד (היד מובילה)</small>
-                    <label for="legVibrationDuration">Vibration Duration (רגל, ms):</label>
+                    <label for="legVibrationDuration">משך הרטט (משני, מילישניות):</label>
                     <input type="number" id="legVibrationDuration" min="100" max="2000" value="400">
                 </div>
 
@@ -1195,11 +1195,11 @@
             <!-- 1.0.72: פרמטרי רגל דרך היד (מוסתר עד חיבור לזוגי עם קושחה תומכת) -->
             <div id="legParamsSection" style="display:none; border:1px solid #d0d7de; border-radius:10px; padding:12px; margin:12px 0; background:#f6f8fa;">
                 <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי צמיד משני (דרך הראשי)</h3>
-                <label for="lp_power">Vibrate Power (משני):</label>
+                <label for="lp_power">עוצמת רטט (משני):</label>
                 <input type="number" id="lp_power" min="160" max="255" value="195" onchange="writeLegParamsToHand_()">
-                <label for="lp_interval">Pulse Interval (משני, ms):</label>
+                <label for="lp_interval">מרווח בין רטטים (משני, מילישניות):</label>
                 <input type="number" id="lp_interval" min="100" max="5000" value="1000" onchange="writeLegParamsToHand_()">
-                <label for="lp_duration">Vibration Duration (משני, ms):</label>
+                <label for="lp_duration">משך הרטט (משני, מילישניות):</label>
                 <input type="number" id="lp_duration" min="100" max="2000" value="400" onchange="writeLegParamsToHand_()">
                 <label for="lp_delay" style="display:none">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
                 <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()" style="display:none">
@@ -1217,7 +1217,7 @@
                 <label for="nb_secondary">⏱️ זמן עבודה צמיד משני (שניות):</label>
                 <input type="number" id="nb_secondary" min="1" max="600" value="6" onchange="nmptBlockCmd_(0)">
                 <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
-                <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>כמות הפולסים (Pulse Number)</strong> שבהגדרות הבסיס, ואז נעצר.</small>
+                <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>מספר הרטטים</strong> שבהגדרות הבסיס, ואז נעצר.</small>
                 <small class="advanced-note">👥 עם שני צמידים <strong>כל הפעלה היא סירוגין</strong> — כפתור "התחל", כפתור 3 בראשי, או START כאן. צמיד יחיד פועל רגיל.</small>
                 <small class="advanced-note">ראשי פועל → נכבה → משני פועל → נכבה → חוזר. בכל רגע רק צמיד אחד רוטט. כל צמיד רוטט לפי הפרמטרים שלו (ראשי — הפרמטרים הראשיים; משני — פרמטרי הצמיד המשני למעלה).</small>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
@@ -1255,7 +1255,7 @@
                 </div>
             </div> <!-- Correctly closing advancedOptions -->
 
-            <h3>Remaining Vibrations: <span id="totalVibrations">0</span></h3>
+            <h3 aria-live="polite">רטטים שנותרו: <span id="totalVibrations">0</span></h3>
         </div> <!-- Correctly closing controlPanel -->
     </div>
     <div id="blePickerModal" class="ble-picker-modal" role="dialog" aria-labelledby="blePickerTitle" aria-modal="true">
@@ -2762,7 +2762,7 @@
                 if (_advSec) _advSec.style.display = 'block';
             } else {
                 document.getElementById('controlPanel').style.display = 'block';
-                document.getElementById('statusMessage').textContent = 'מחובר לצמיד · Golden life - ' + (formatMacPlain_(extractMacFromDeviceName(device.name || '')) || '—');
+                document.getElementById('statusMessage').textContent = 'מחובר לצמיד · Golden life - ' + (formatMacPlain_(extractMacFromDeviceName((device && device.name) || '')) || '—');
                 // NMPT: טעינת מצב יחיד/זוגי מהשרת לפי ה-MAC המחובר
                 loadUserDeviceMode(extractMacFromDeviceName(device.name || ''));
             }
@@ -2929,16 +2929,15 @@
                 return;
             }
 
-            const vibratePowerValue = await charVibratePower.readValue();
-            const vibratePower = new DataView(vibratePowerValue.buffer).getUint8(0);
-            document.getElementById('vibratePower').value = vibratePower;
-
-            const pulseIntervalValue = await charPulseInterval.readValue();
-            const pulseInterval = new DataView(pulseIntervalValue.buffer).getUint16(0, true);
-            document.getElementById('pulseInterval').value = pulseInterval;
-
-            const pulseNumberValue = await charPulseNumber.readValue();
-            const pulseNumber = new DataView(pulseNumberValue.buffer).getUint16(0, true);
+            await runGattOp(async function () {
+                const _vp = await charVibratePower.readValue();
+                document.getElementById('vibratePower').value = new DataView(_vp.buffer).getUint8(0);
+                const _pi = await charPulseInterval.readValue();
+                document.getElementById('pulseInterval').value = new DataView(_pi.buffer).getUint16(0, true);
+                const _pn = await charPulseNumber.readValue();
+                document.getElementById('pulseNumber').value = new DataView(_pn.buffer).getUint16(0, true);
+            });
+            const pulseNumber = parseInt(document.getElementById('pulseNumber').value,10)||0;
 
             document.getElementById('pulseNumber').value = pulseNumber;
             var _legPNsync = document.getElementById('legPulseNumber'); if (_legPNsync) _legPNsync.value = pulseNumber;  // רגל = יד
@@ -2948,8 +2947,8 @@
             document.getElementById('vibrationDuration').value = vibrationDuration;
 
         } catch (error) {
-            console.error("Failed to load settings from BLE: ", error);
-            handleBleDisconnected(); // Handle disconnection on read errors
+            console.warn("loadSettingsFromBLE: קריאת הגדרות נכשלה (לא קריטי):", error && error.message ? error.message : error);
+            // לא מנתקים — החיבור עדיין תקין
         }
     }
 
@@ -3620,9 +3619,15 @@
     }
 
     function handleVibrationUpdate(event) {
-        const value = event.target.value.getUint16(0, true);
+        const data = event && event.target ? event.target.value : null;
+        if (!data || data.byteLength < 2) {
+            console.warn('Vibration Status notification ignored: expected 2 bytes.');
+            return;
+        }
+        const value = data.getUint16(0, true);
         lastRemainingVibrations = value;
-        document.getElementById('totalVibrations').textContent = value;
+        document.getElementById('totalVibrations').textContent = String(value);
+        console.log('Vibration Status Notification:', value);
     }
 
 
