@@ -1825,15 +1825,18 @@
 
     function requestBleDeviceFallback_(opts) {
         opts = opts || {};
-        var filters = opts.secondaryOnly
-            ? [{ namePrefix: 'משני - ' }, { namePrefix: 'Golden life - ' }]
-            : BLE_NAME_FILTERS_;
+        // סריקת משני: כל שמות Golden Life — בהגדרה ראשונית המשני עדיין «ראשי»/«יחיד»
+        var filters = BLE_NAME_FILTERS_;
         return navigator.bluetooth.requestDevice({
             filters: filters,
             optionalServices: BLE_OPTIONAL_SERVICES
         }).then(function (dev) {
             var exclude = normalizeMacInputGl_(opts.excludeMac || '');
+            var excludeId = String(opts.excludeDeviceId || '');
             var mac = normalizeMacInputGl_(extractMacFromDeviceName(dev.name || ''));
+            if (excludeId && String(dev.id || '') === excludeId) {
+                throw new Error('נבחר הצמיד המחובר כרגע. אנא בחר את הצמיד המשני לשיוך.');
+            }
             if (exclude && mac && exclude === mac) {
                 throw new Error('נבחר הצמיד המחובר כרגע. אנא בחר את הצמיד המשני לשיוך.');
             }
@@ -1849,6 +1852,7 @@
         return new Promise(function (resolve, reject) {
             var found = new Map();
             var excludeMac = normalizeMacInputGl_(opts.excludeMac || '');
+            var excludeDeviceId = String(opts.excludeDeviceId || '');
             var secondaryOnly = !!opts.secondaryOnly;
             var modal = document.getElementById('blePickerModal');
             var listEl = document.getElementById('blePickerList');
@@ -1864,19 +1868,24 @@
                 cancelBtn.onclick = null;
             }
 
+            function isExcludedDevice_(it) {
+                if (!it) return false;
+                if (excludeDeviceId && String(it.id || '') === excludeDeviceId) return true;
+                if (excludeMac && normalizeMacInputGl_(it.macPlain) === excludeMac) return true;
+                return false;
+            }
+
             function renderList() {
                 listEl.textContent = '';
                 var items = Array.from(found.values()).filter(function (it) {
-                    if (excludeMac && normalizeMacInputGl_(it.macPlain) === excludeMac) return false;
-                    if (secondaryOnly && it.roleLabel === 'ראשי') return false;
-                    return true;
+                    return !isExcludedDevice_(it);
                 });
                 items.sort(function (a, b) { return (b.rssi || -999) - (a.rssi || -999); });
                 if (!items.length) {
                     var empty = document.createElement('p');
                     empty.className = 'ble-picker-empty';
                     empty.textContent = secondaryOnly
-                        ? 'מחפש צמיד משני… הצמיד המחובר כרגע לא מוצג ברשימה.'
+                        ? 'מחפש צמיד לשיוך… הצמיד המחובר לא מוצג. אם אין ברשימה — העירו את המשני בכפתור 3.'
                         : 'מחפש צמידים בקרבת מקום… ודאו שהצמיד דלוק וקרוב לטלפון.';
                     listEl.appendChild(empty);
                     return;
@@ -1903,7 +1912,7 @@
                     btn.onclick = function () {
                         var entry = found.get(btn.dataset.id);
                         if (!entry) return;
-                        if (excludeMac && normalizeMacInputGl_(entry.macPlain) === excludeMac) {
+                        if (isExcludedDevice_(entry)) {
                             statusEl.textContent = 'נבחר הצמיד המחובר כרגע. אנא בחר את הצמיד המשני לשיוך.';
                             return;
                         }
@@ -1928,7 +1937,7 @@
 
             modal.classList.add('is-open');
             statusEl.textContent = secondaryOnly
-                ? 'סורק משני… הצמיד המחובר לא מוצג'
+                ? 'סורק לשיוך משני… הצמיד המחובר מוסתר. העירו בכפתור אם לא מופיע'
                 : 'סורק… בחרו צמיד לפי כתובת MAC';
             renderList();
 
@@ -1938,14 +1947,12 @@
                 requestBleDeviceFallback_(opts).then(resolve, reject);
             }, 4000);
 
-            var scanFilters = secondaryOnly
-                ? [{ namePrefix: 'משני - ' }, { namePrefix: 'Golden life' }]
-                : [
-                    { namePrefix: 'Golden life' },
-                    { namePrefix: 'ראשי' },
-                    { namePrefix: 'משני' },
-                    { namePrefix: 'יחיד' }
-                ];
+            var scanFilters = [
+                { namePrefix: 'Golden life' },
+                { namePrefix: 'ראשי' },
+                { namePrefix: 'משני' },
+                { namePrefix: 'יחיד' }
+            ];
             navigator.bluetooth.requestLEScan({
                 filters: scanFilters,
                 keepRepeatedDevices: true
@@ -1957,8 +1964,9 @@
                     var name = advName || event.device.name || '';
                     var macRaw = extractMacFromDeviceName(name);
                     var macPlain = normalizeMacInputGl_(macRaw);
+                    var devId = String((event.device && event.device.id) || '');
+                    if (excludeDeviceId && devId === excludeDeviceId) return;
                     if (excludeMac && macPlain === excludeMac) return;
-                    if (secondaryOnly && bleRoleLabelFromName_(name) === 'ראשי') return;
                     found.set(event.device.id, {
                         id: event.device.id,
                         device: event.device,
@@ -2052,7 +2060,7 @@
         } catch (e) { }
     }
 
-    var GL_LOCAL_BUILD_TAG = 'v2026-09-17-ota-resilience';
+    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ota-update-msg';
     /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
     var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
     console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
@@ -2657,28 +2665,49 @@
                     '&version=' + encodeURIComponent(_currentFirmwareVersion));
                 completePendingOtaVerification(_macForFwCheck, _currentFirmwareVersion);
             }
+            var _roleHebFw = bleRoleLabelFromName_((device && device.name) || '') || 'צמיד';
             var _offerOta = _fwData && _fwData.ok && _fwData.downloadUrl && _macForFwCheck &&
                 (_fwData.otaAllowed === true || _fwData.needsOta === true);
             if (!_offerOta) {
                 if (_fwData && _fwData.ok && versionCompareSemver(_currentFirmwareVersion, _fwData.latestVersion || '') >= 0) {
                     markOtaAutoComplete_(_macForFwCheck, String(_fwData.latestVersion || ''));
                     document.getElementById('statusMessage').textContent =
-                        'מחובר — גרסה ' + _currentFirmwareVersion + '. ניתן להפעיל תרחישים (התחל).';
+                        _roleHebFw + ' · גרסה ' + _currentFirmwareVersion +
+                        ' מעודכנת (שרת: ' + String(_fwData.latestVersion || '—') +
+                        '). ניתן להפעיל תרחישים (התחל).';
+                } else if (_fwData && _fwData.ok && _fwData.latestVersion) {
+                    document.getElementById('statusMessage').textContent =
+                        _roleHebFw + ' · גרסה ' + _currentFirmwareVersion +
+                        ' · שרת: ' + String(_fwData.latestVersion || '—');
                 }
                 return result;
             }
             var _otaTargetVer = String(_fwData.latestVersion || '');
-            if (!shouldOfferAutoOta_(_macForFwCheck, _otaTargetVer)) return result;
+            if (!shouldOfferAutoOta_(_macForFwCheck, _otaTargetVer)) {
+                document.getElementById('statusMessage').textContent =
+                    _roleHebFw + ': עדכון ל-' + _otaTargetVer +
+                    ' כבר הושלם / נחסם בסשן זה. רענון F5 אם צריך לנסות שוב.';
+                return result;
+            }
             var _batteryKnownLow = (lastBatteryPercent != null && lastBatteryPercent < 40) ||
                 (lastBatteryVoltage != null && lastBatteryVoltage > 0 && lastBatteryVoltage < 3.75);
             if (_batteryKnownLow) {
-                document.getElementById('statusMessage').textContent = 'נמצא עדכון קושחה ל-' + _otaTargetVer +
-                    ', אך הסוללה נמוכה. טען את הצמיד — אחרי טעינה התחברו שוב (ינסה OTA שוב).';
+                var _lowBattMsg = _roleHebFw + ': נמצא עדכון קושחה ' +
+                    _currentFirmwareVersion + ' → ' + _otaTargetVer +
+                    ', אך הסוללה נמוכה. טען את הצמיד — אחרי טעינה התחברו שוב.';
+                document.getElementById('statusMessage').textContent = _lowBattMsg;
+                try { alert(_lowBattMsg); } catch (eLow) { }
                 return result;
             }
-            document.getElementById('statusMessage').textContent = (_isInventoryMode || _fwData.updateOnlyMode)
-                ? 'צמיד לא רשום: נמצא עדכון ל-' + _otaTargetVer + '. מבצע OTA אוטומטי, נא לא לסגור את הדף.'
-                : 'מעדכן קושחה ל-' + _otaTargetVer + ' — אין הפעלת תרחישים עד סיום וחיבור מחדש.';
+            var _updMsg = (_isInventoryMode || _fwData.updateOnlyMode)
+                ? (_roleHebFw + ': צמיד לא רשום — נמצא עדכון ' +
+                   _currentFirmwareVersion + ' → ' + _otaTargetVer + '. מבצע OTA אוטומטי…')
+                : (_roleHebFw + ': נמצא עדכון קושחה ' +
+                   _currentFirmwareVersion + ' → ' + _otaTargetVer + '. מתחיל OTA אוטומטי…');
+            document.getElementById('statusMessage').textContent = _updMsg;
+            try { alert(_updMsg); } catch (eUpd) { }
+            document.getElementById('statusMessage').textContent =
+                'מעדכן קושחה ל-' + _otaTargetVer + ' — אין הפעלת תרחישים עד סיום וחיבור מחדש.';
             await runAutomaticOTA(_fwData.downloadUrl, _otaTargetVer, _macForFwCheck);
             result.didOta = true;
         } catch (fwErr) {
@@ -3478,7 +3507,11 @@
             }
             setNmptDualStatus_('בחרו את הצמיד המשני...', false);
             var handMac = normalizeMacInputGl_(extractMacFromDeviceName(device ? (device.name || '') : ''));
-            legDevice = await pickBleDevice_({ excludeMac: handMac, secondaryOnly: true });
+            legDevice = await pickBleDevice_({
+                excludeMac: handMac,
+                excludeDeviceId: (device && device.id) ? String(device.id) : '',
+                secondaryOnly: true
+            });
             legDevice.addEventListener('gattserverdisconnected', function () {
                 var s = document.getElementById('nmptLegStatus');
                 if (s) {
