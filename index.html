@@ -451,6 +451,7 @@
     <base target="_top" />
     <title>Life Golden</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="Goldenlife.css">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -1128,7 +1129,7 @@
             <h3>תרחישים שנותרו: <span id="remainingScenariosDisplay">--</span></h3>
 
             <label for="vibratePower">עוצמת רטט:</label>
-            <input type="number" id="vibratePower" min="160" max="255" placeholder="הזן עוצמת רטט"
+            <input type="number" id="vibratePower" min="1" max="255" placeholder="הזן עוצמת רטט"
                 onchange="updateBLEValue('vibratePower')">
 
             <label for="pulseInterval">מרווח בין רטטים (מילישניות):</label>
@@ -1149,6 +1150,9 @@
             <button id="stopButton" onclick="stopScenario()">
                 <i class="fas fa-stop-circle"></i> עצור סנריו
             </button>
+            <button id="saveToDeviceButton" onclick="saveAllParamsToDevice_()">
+                <i class="fas fa-save"></i> שמור לצמיד המחובר
+            </button>
             <button id="batteryTestButton" class="battery-test-button" onclick="startBatteryTest()">
                 <i class="fas fa-battery-half"></i> בדיקת סוללה
             </button>
@@ -1167,7 +1171,7 @@
                     </button>
 
                     <label for="legVibratePower">עוצמת רטט (משני):</label>
-                    <input type="number" id="legVibratePower" min="160" max="255" value="195">
+                    <input type="number" id="legVibratePower" min="1" max="255" value="24">
                     <label for="legPulseInterval">מרווח בין רטטים (משני, מילישניות):</label>
                     <input type="number" id="legPulseInterval" min="100" max="5000" value="1000">
                     <label for="legPulseNumber">מספר רטטים (משני):</label>
@@ -1193,25 +1197,25 @@
             </div>
 
             <!-- 1.0.72: פרמטרי רגל דרך היד (מוסתר עד חיבור לזוגי עם קושחה תומכת) -->
-            <div id="legParamsSection" style="display:none; border:1px solid #d0d7de; border-radius:10px; padding:12px; margin:12px 0; background:#f6f8fa;">
-                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-shoe-prints"></i> פרמטרי צמיד משני (דרך הראשי)</h3>
+            <div id="legParamsSection">
+                <h3><i class="fas fa-shoe-prints"></i> פרמטרי צמיד משני (דרך הראשי)</h3>
                 <label for="lp_power">עוצמת רטט (משני):</label>
-                <input type="number" id="lp_power" min="160" max="255" value="195" onchange="writeLegParamsToHand_()">
+                <input type="number" id="lp_power" min="1" max="255" value="24" onchange="writeLegParamsToHand_()">
                 <label for="lp_interval">מרווח בין רטטים (משני, מילישניות):</label>
                 <input type="number" id="lp_interval" min="100" max="5000" value="1000" onchange="writeLegParamsToHand_()">
                 <label for="lp_duration">משך הרטט (משני, מילישניות):</label>
                 <input type="number" id="lp_duration" min="100" max="2000" value="400" onchange="writeLegParamsToHand_()">
-                <label for="lp_delay" style="display:none">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
-                <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()" style="display:none">
+                <label for="lp_delay">⏸️ זמן הפסקה בין ראשי למשני (שניות, 2-10):</label>
+                <input type="number" id="lp_delay" min="2" max="10" value="3" onchange="writeLegParamsToHand_()">
                 
                 <small class="advanced-note">💾 כל שינוי נשמר אוטומטית בצמיד.</small>
                 <small class="advanced-note">כמות הרטטים של המשני = כמו הראשי. הערכים נשלחים למשני בהפעלה הבאה (דרך הראשי).</small>
-                <div id="lp_status" style="margin-top:6px;font-weight:600;"></div>
+                <div id="lp_status"></div>
             </div>
 
             <!-- 1.0.76: NMPT — סירוגין בלוקי זמן ראשי/משני (מוצג רק לראשי בזוגי עם קושחה 1.0.76+) -->
-            <div id="nmptBlockSection" style="display:none; border:1px solid #c9b8f5; border-radius:10px; padding:12px; margin:12px 0; background:#f5f1ff;">
-                <h3 style="margin:0 0 8px; color:#6f42c1;"><i class="fas fa-exchange-alt"></i> NMPT — סירוגין ראשי / משני</h3>
+            <div id="nmptBlockSection">
+                <h3><i class="fas fa-exchange-alt"></i> NMPT — סירוגין ראשי / משני</h3>
                 <label for="nb_primary">⏱️ זמן עבודה צמיד ראשי (שניות):</label>
                 <input type="number" id="nb_primary" min="1" max="600" value="6" onchange="nmptBlockCmd_(0)">
                 <label for="nb_secondary">⏱️ זמן עבודה צמיד משני (שניות):</label>
@@ -1220,12 +1224,12 @@
                 <small class="advanced-note">🔁 משך: כל צמיד מבצע את <strong>מספר הרטטים</strong> שבהגדרות הבסיס, ואז נעצר.</small>
                 <small class="advanced-note">👥 עם שני צמידים <strong>כל הפעלה היא סירוגין</strong> — כפתור "התחל", כפתור 3 בראשי, או START כאן. צמיד יחיד פועל רגיל.</small>
                 <small class="advanced-note">ראשי פועל → נכבה → משני פועל → נכבה → חוזר. בכל רגע רק צמיד אחד רוטט. כל צמיד רוטט לפי הפרמטרים שלו (ראשי — הפרמטרים הראשיים; משני — פרמטרי הצמיד המשני למעלה).</small>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                <div class="nmpt-block-actions">
                     
-                    <button type="button" onclick="nmptBlockCmd_(1)" style="background:#1e8449;"><i class="fas fa-play"></i> START</button>
-                    <button type="button" onclick="nmptBlockCmd_(2)" style="background:#c0392b;"><i class="fas fa-stop"></i> STOP</button>
+                    <button type="button" id="nmptStartBtn" onclick="nmptBlockCmd_(1)"><i class="fas fa-play"></i> START</button>
+                    <button type="button" id="nmptStopBtn" onclick="nmptBlockCmd_(2)"><i class="fas fa-stop"></i> STOP</button>
                 </div>
-                <div id="nb_status" style="margin-top:6px;font-weight:600;"></div>
+                <div id="nb_status"></div>
             </div>
 
             <button onclick="toggleAdvancedOptions()"><i class="fas fa-cogs"></i> אפשרויות מתקדמות</button>
@@ -1386,16 +1390,9 @@
     let _autoDisconnectForNmpt_ = 0;      // 1.0.76: אחרי NMPT START(1)/STOP(2) — מנתקים כדי שהראשי יסנכרן/יעצור את המשני
     let _reconnectDevice_ = null;         // חיבור מחדש אוטומטי לאותו צמיד אחרי ניתוק יזום (בלי חלון בחירה)
 
-    // ניתוק יזום קצר (C6: ESP-NOW רק בלי BLE) ואז חיבור מחדש אוטומטי. ms ≥ משך ה-burst כדי לא לקטוע אותו.
+    // ניתוק יזום ל-ESP-NOW — בלי חיבור מחדש אוטומטי (רק בלחיצת «התחבר»)
     function scheduleAutoReconnect_(dev, ms) {
-        if (!dev) return;
-        _reconnectDevice_ = dev;
-        setTimeout(function () {
-            if (_reconnectDevice_ && !(device && device.gatt && device.gatt.connected)) {
-                document.getElementById('statusMessage').textContent = 'מתחבר מחדש לצמיד...';
-                connectBLE(false).catch(function () { });
-            } else { _reconnectDevice_ = null; }
-        }, ms);
+        _reconnectDevice_ = null;
     }
     let _otaInProgress = false;   // true כשמתבצע OTA — ניתוק BLE לא יעצור את התהליך
     let _otaAwaitingReboot = false; // true אחרי END_OTA עד grace / חיבור מחדש
@@ -1766,15 +1763,37 @@
     let _preferDeviceLogs = false;
 
     function extractMacFromDeviceName(name) {
-        // Device name is "Golden life - <MAC>"
-        const prefix = "Golden life - ";
         if (typeof name !== "string") return "";
-        const idx = name.indexOf(prefix);
-        if (idx === -1) return "";
-        return name.substring(idx + prefix.length).trim();
+        var prefixes = ["Golden life - ", "ראשי - ", "משני - ", "יחיד - "];
+        for (var i = 0; i < prefixes.length; i++) {
+            var idx = name.indexOf(prefixes[i]);
+            if (idx !== -1) {
+                return String(name.substring(idx + prefixes[i].length)).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+            }
+        }
+        var hex = String(name).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        return hex.length >= 12 ? hex.slice(-12) : "";
+    }
+
+    function bleRoleLabelFromName_(name) {
+        var n = String(name || '');
+        if (n.indexOf('ראשי') === 0) return 'ראשי';
+        if (n.indexOf('משני') === 0) return 'משני';
+        if (n.indexOf('יחיד') === 0) return 'יחיד';
+        return 'צמיד';
+    }
+
+    function normalizeMacInputGl_(raw) {
+        return String(raw || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
     }
 
     const BLE_DEVICE_PREFIX = 'Golden life - ';
+    const BLE_NAME_FILTERS_ = [
+        { namePrefix: 'Golden life - ' },
+        { namePrefix: 'ראשי - ' },
+        { namePrefix: 'משני - ' },
+        { namePrefix: 'יחיד - ' }
+    ];
     const BLE_OPTIONAL_SERVICES = [mainServiceUuid, otaServiceUuid, logServiceUuid];
     let _bleScanController = null;
 
@@ -1784,15 +1803,16 @@
     }
 
     function formatMacDisplay_(mac) {
-        var raw = String(mac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
-        if (raw.length === 12) {
-            return raw.replace(/(.{2})(?=.)/g, '$1:');
-        }
-        return raw || '—';
+        return formatMacPlain_(mac);
     }
 
     function isGoldenLifeBleName_(name) {
-        return typeof name === 'string' && name.indexOf('Golden life') !== -1;
+        if (typeof name !== 'string') return false;
+        if (name.indexOf('Golden life') !== -1) return true;
+        if (name.indexOf('ראשי - ') === 0) return true;
+        if (name.indexOf('משני - ') === 0) return true;
+        if (name.indexOf('יחיד - ') === 0) return true;
+        return false;
     }
 
     function stopBleScan_() {
@@ -1802,25 +1822,39 @@
         }
     }
 
-    function requestBleDeviceFallback_() {
+    function requestBleDeviceFallback_(opts) {
+        opts = opts || {};
+        var filters = opts.secondaryOnly
+            ? [{ namePrefix: 'משני - ' }, { namePrefix: 'Golden life - ' }]
+            : BLE_NAME_FILTERS_;
         return navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: BLE_DEVICE_PREFIX }],
+            filters: filters,
             optionalServices: BLE_OPTIONAL_SERVICES
+        }).then(function (dev) {
+            var exclude = normalizeMacInputGl_(opts.excludeMac || '');
+            var mac = normalizeMacInputGl_(extractMacFromDeviceName(dev.name || ''));
+            if (exclude && mac && exclude === mac) {
+                throw new Error('נבחר הצמיד המחובר כרגע. אנא בחר את הצמיד המשני לשיוך.');
+            }
+            return dev;
         });
     }
 
-    function pickBleDevice_() {
+    function pickBleDevice_(opts) {
+        opts = opts || {};
         if (!navigator.bluetooth.requestLEScan) {
-            return requestBleDeviceFallback_();
+            return requestBleDeviceFallback_(opts);
         }
         return new Promise(function (resolve, reject) {
             var found = new Map();
+            var excludeMac = normalizeMacInputGl_(opts.excludeMac || '');
+            var secondaryOnly = !!opts.secondaryOnly;
             var modal = document.getElementById('blePickerModal');
             var listEl = document.getElementById('blePickerList');
             var statusEl = document.getElementById('blePickerStatus');
             var cancelBtn = document.getElementById('blePickerCancel');
             if (!modal || !listEl || !statusEl || !cancelBtn) {
-                return requestBleDeviceFallback_().then(resolve, reject);
+                return requestBleDeviceFallback_(opts).then(resolve, reject);
             }
 
             function cleanup() {
@@ -1831,12 +1865,18 @@
 
             function renderList() {
                 listEl.textContent = '';
-                var items = Array.from(found.values());
+                var items = Array.from(found.values()).filter(function (it) {
+                    if (excludeMac && normalizeMacInputGl_(it.macPlain) === excludeMac) return false;
+                    if (secondaryOnly && it.roleLabel === 'ראשי') return false;
+                    return true;
+                });
                 items.sort(function (a, b) { return (b.rssi || -999) - (a.rssi || -999); });
                 if (!items.length) {
                     var empty = document.createElement('p');
                     empty.className = 'ble-picker-empty';
-                    empty.textContent = 'מחפש צמידים בקרבת מקום… ודאו שהצמיד דלוק וקרוב לטלפון.';
+                    empty.textContent = secondaryOnly
+                        ? 'מחפש צמיד משני… הצמיד המחובר כרגע לא מוצג ברשימה.'
+                        : 'מחפש צמידים בקרבת מקום… ודאו שהצמיד דלוק וקרוב לטלפון.';
                     listEl.appendChild(empty);
                     return;
                 }
@@ -1847,7 +1887,7 @@
                     btn.dataset.id = item.id;
                     var title = document.createElement('span');
                     title.className = 'ble-picker-item__title';
-                    title.textContent = 'צמיד Golden Life';
+                    title.textContent = item.roleLabel || 'צמיד';
                     var mac = document.createElement('span');
                     mac.className = 'ble-picker-item__mac';
                     mac.textContent = item.macDisplay;
@@ -1862,15 +1902,18 @@
                     btn.onclick = function () {
                         var entry = found.get(btn.dataset.id);
                         if (!entry) return;
+                        if (excludeMac && normalizeMacInputGl_(entry.macPlain) === excludeMac) {
+                            statusEl.textContent = 'נבחר הצמיד המחובר כרגע. אנא בחר את הצמיד המשני לשיוך.';
+                            return;
+                        }
                         cleanup();
-                        // Chrome: מכשיר מ-requestLEScan אינו מורשה ל-GATT.connect — צריך requestDevice.
                         var exactName = (entry.device && entry.device.name) || '';
                         var reqOpts = { optionalServices: BLE_OPTIONAL_SERVICES };
                         if (exactName) reqOpts.filters = [{ name: exactName }];
-                        else reqOpts.filters = [{ namePrefix: BLE_DEVICE_PREFIX }];
+                        else reqOpts.filters = BLE_NAME_FILTERS_;
                         navigator.bluetooth.requestDevice(reqOpts).then(resolve, function (err) {
                             console.warn('requestDevice by exact name failed, falling back to prefix:', err);
-                            requestBleDeviceFallback_().then(resolve, reject);
+                            requestBleDeviceFallback_(opts).then(resolve, reject);
                         });
                     };
                     listEl.appendChild(btn);
@@ -1883,11 +1926,27 @@
             };
 
             modal.classList.add('is-open');
-            statusEl.textContent = 'סורק… בחרו צמיד לפי כתובת MAC';
+            statusEl.textContent = secondaryOnly
+                ? 'סורק משני… הצמיד המחובר לא מוצג'
+                : 'סורק… בחרו צמיד לפי כתובת MAC';
             renderList();
 
+            var emptyFallbackTimer = setTimeout(function () {
+                if (found.size > 0) return;
+                cleanup();
+                requestBleDeviceFallback_(opts).then(resolve, reject);
+            }, 4000);
+
+            var scanFilters = secondaryOnly
+                ? [{ namePrefix: 'משני - ' }, { namePrefix: 'Golden life' }]
+                : [
+                    { namePrefix: 'Golden life' },
+                    { namePrefix: 'ראשי' },
+                    { namePrefix: 'משני' },
+                    { namePrefix: 'יחיד' }
+                ];
             navigator.bluetooth.requestLEScan({
-                filters: [{ namePrefix: 'Golden life' }],
+                filters: scanFilters,
                 keepRepeatedDevices: true
             }).then(function (controller) {
                 _bleScanController = controller;
@@ -1896,17 +1955,24 @@
                     if (!isGoldenLifeBleName_(advName) && !isGoldenLifeBleName_(event.device.name || '')) return;
                     var name = advName || event.device.name || '';
                     var macRaw = extractMacFromDeviceName(name);
+                    var macPlain = normalizeMacInputGl_(macRaw);
+                    if (excludeMac && macPlain === excludeMac) return;
+                    if (secondaryOnly && bleRoleLabelFromName_(name) === 'ראשי') return;
                     found.set(event.device.id, {
                         id: event.device.id,
                         device: event.device,
-                        macDisplay: formatMacDisplay_(macRaw) || name.replace(/^Golden life\s*-\s*/i, '').trim() || name,
+                        macPlain: macPlain,
+                        macDisplay: formatMacDisplay_(macRaw) || macPlain || name,
+                        roleLabel: bleRoleLabelFromName_(name),
                         rssi: event.rssi
                     });
+                    clearTimeout(emptyFallbackTimer);
                     renderList();
                 });
             }).catch(function () {
+                clearTimeout(emptyFallbackTimer);
                 cleanup();
-                requestBleDeviceFallback_().then(resolve, reject);
+                requestBleDeviceFallback_(opts).then(resolve, reject);
             });
         });
     }
@@ -2472,28 +2538,29 @@
         }
 
         if (_autoNmptDisc === 1) {
-            document.getElementById('statusMessage').textContent = 'NMPT הופעל ✓ הראשי מסנכרן את המשני — מתחבר מחדש אוטומטית בעוד כמה שניות...';
+            document.getElementById('statusMessage').textContent = 'NMPT הופעל ✓ הראשי מסנכרן את המשני. לחץ «התחבר» כשתרצה לחזור.';
             document.getElementById('errorMessage').style.display = 'none';
-            scheduleAutoReconnect_(device, 4500);
+            _reconnectDevice_ = null;
         } else if (_autoNmptDisc === 2) {
-            document.getElementById('statusMessage').textContent = 'NMPT נעצר ✓ הראשי והמשני כבויים — מתחבר מחדש אוטומטית...';
+            document.getElementById('statusMessage').textContent = 'NMPT נעצר ✓ הראשי והמשני כבויים. לחץ «התחבר» כשתרצה לחזור.';
             document.getElementById('errorMessage').style.display = 'none';
-            scheduleAutoReconnect_(device, 2500);
+            _reconnectDevice_ = null;
         } else if (_autoStartDisc) {
             var _lpD = document.getElementById('lp_delay');
             var _legDly = _lpD ? parseInt(_lpD.value, 10) : 0;
             var _dtxt = (_legDly > 0) ? ('בהפסקה של ' + _legDly + ' שניות אחרי שהראשי מסיים') : 'לפי ההשהיה שהגדרת';
-            document.getElementById('statusMessage').textContent = 'הופעל ✓ ראשי ומשני מתחלפים (סירוגין) — מתחבר מחדש אוטומטית בעוד כמה שניות...';
+            document.getElementById('statusMessage').textContent = 'הופעל ✓ ראשי ומשני מתחלפים (סירוגין). לחץ «התחבר» כשתרצה לחזור.';
             document.getElementById('errorMessage').style.display = 'none';
-            scheduleAutoReconnect_(device, 6000);   // אחרי ה-burst (5ש') שמעיר את המשני
+            _reconnectDevice_ = null;
         } else if (_autoStopDisc) {
-            document.getElementById('statusMessage').textContent = 'נעצר ✓ הראשי והמשני נעצרו — מתחבר מחדש אוטומטית...';
+            document.getElementById('statusMessage').textContent = 'נעצר ✓ הראשי והמשני נעצרו. לחץ «התחבר» כשתרצה לחזור.';
             document.getElementById('errorMessage').style.display = 'none';
-            scheduleAutoReconnect_(device, 6000);
+            _reconnectDevice_ = null;
         } else {
             document.getElementById('statusMessage').textContent = 'החיבור לצמיד נותק.';
             document.getElementById('errorMessage').textContent = "חיבור נותק. אנא לחץ על 'התחבר ל-ESP32 BLE' כדי לבחור ולהתחבר מחדש."; // הודעה מפורטת יותר
             document.getElementById('errorMessage').style.display = 'block';
+            _reconnectDevice_ = null;
         }
 
         // Hide control panel, show connect button
@@ -2830,6 +2897,24 @@
         document.getElementById('totalVibrations').textContent = remainingVibrations;
     }
 
+    // שמירת כל הפרמטרים לצמיד המחובר (ראשי או משני). כשמחוברים למשני — נשמר ב-NVS שלו.
+    async function saveAllParamsToDevice_() {
+        if (!device || !device.gatt || !device.gatt.connected) {
+            document.getElementById('statusMessage').textContent = 'הצמיד מנותק — התחבר ואז שמור.';
+            return;
+        }
+        try {
+            await updateBLEValue('vibratePower');
+            await updateBLEValue('pulseInterval');
+            await updateBLEValue('pulseNumber');
+            await updateBLEValue('vibrationDuration');
+            document.getElementById('statusMessage').textContent = 'נשמר ✓ הפרמטרים נכתבו לצמיד המחובר.';
+            document.getElementById('errorMessage').style.display = 'none';
+        } catch (e) {
+            document.getElementById('statusMessage').textContent = 'שמירה נכשלה: ' + (typeof heErr_==='function'?heErr_(e):(e&&e.message?e.message:e));
+        }
+    }
+
     async function updateBLEValue(field) {
         if (field === 'pulseNumber') {  // רגל = יד: כמות הרטטים של הרגל תמיד זהה ליד (היד מובילה)
             var _lpn = document.getElementById('legPulseNumber');
@@ -2837,9 +2922,8 @@
             if (_lpn && _hpn) _lpn.value = _hpn.value;
         }
         try {
-            if (!device || !device.gatt.connected) {
+            if (!device || !device.gatt || !device.gatt.connected) {
                 console.warn('Cannot update BLE value: Device not connected.');
-                handleBleDisconnected(); // Show disconnection message
                 return;
             }
             await runGattOp(async function () {
@@ -2918,7 +3002,11 @@
             }
         } catch (error) {
             console.error(`Failed to update ${field} on BLE:`, error);
-            handleBleDisconnected(); // Also handle disconnection on write errors
+            var stillUp = false;
+            try { stillUp = !!(device && device.gatt && device.gatt.connected); } catch (e2) { }
+            if (!stillUp) return;
+            var sm = document.getElementById('statusMessage');
+            if (sm) sm.textContent = 'כתיבה נכשלה (' + field + '): ' + (typeof heErr_ === 'function' ? heErr_(error) : (error && error.message ? error.message : error)) + ' — החיבור עדיין פתוח, נסה שוב.';
         }
     }
 
@@ -3335,20 +3423,20 @@
         var pw = parseInt(document.getElementById('lp_power').value, 10) || 195;
         var itv = parseInt(document.getElementById('lp_interval').value, 10) || 1000;
         var dur = parseInt(document.getElementById('lp_duration').value, 10) || 400;
-        // זמן הפסקה בין יד לרגל (2-10ש') → הרגל מתחילה אחרי התקף היד + ההפסקה → אף פעם לא יחד
+        // הפסקה 2-10ש' ב-localStorage בלבד. לא לחשב burst+pause ל-legDelay (אוסר דריסת 20 ב-NVS).
         var pauseSec = parseInt(document.getElementById('lp_delay').value, 10) || 3;
         if (pauseSec < 2) pauseSec = 2; if (pauseSec > 10) pauseSec = 10;
-        var handBurstSec = Math.ceil(((parseInt(document.getElementById('pulseNumber').value, 10) || 1) * (parseInt(document.getElementById('pulseInterval').value, 10) || 1000)) / 1000);
-        var dly = handBurstSec + pauseSec;
+        var delayEl = document.getElementById('nmptLegDelayInput') || document.getElementById('legDelay');
+        var dly = parseInt(delayEl && delayEl.value, 10);
+        if (isNaN(dly) || dly < 1) dly = 20;
+        if (dly > 3600) dly = 3600;
         if (pw < 1) pw = 1; if (pw > 255) pw = 255;
-        if (dly < 1) dly = 1; if (dly > 3600) dly = 3600;
         var buf = new ArrayBuffer(7); var dv = new DataView(buf);
         dv.setUint8(0, pw); dv.setUint16(1, itv, true); dv.setUint16(3, dur, true); dv.setUint16(5, dly, true);
         try {
             await runGattOp(async function () { await charLegParams.writeValue(buf); });
             try { localStorage.setItem('gl_pause_' + (nmptHandMac || ''), String(pauseSec)); } catch (e) { }
-            ['legDelay', 'nmptLegDelayInput'].forEach(function (id) { var _el = document.getElementById(id); if (_el) _el.value = dly; });  // שדה ההשהיה הגולמי מתעדכן — כתיבת תפקיד לא תדרוס
-            setLegParamsStatus_('נשמר ✓ הפסקה ' + pauseSec + 'ש\'. הראשי רוטט ~' + handBurstSec + 'ש\' → הפסקה → המשני (מתחיל ' + dly + 'ש\' אחרי הראשי) — בלי חפיפה.', false);
+            setLegParamsStatus_('נשמר ✓ פרמטרי משני (השהיית זוג ' + dly + 'ש\' נשמרה — לא נדרסה).', false);
         } catch (e) { setLegParamsStatus_('שגיאה: ' + heErr_(e), true); }
     }
 
@@ -3387,8 +3475,9 @@
             if (!navigator.bluetooth || !isSecureBleContext_()) {
                 setNmptDualStatus_('חיבור בלוטות\' לא זמין בדפדפן הזה.', true); return;
             }
-            setNmptDualStatus_('בחרו את צמיד הרגל...', false);
-            legDevice = await pickBleDevice_();
+            setNmptDualStatus_('בחרו את הצמיד המשני...', false);
+            var handMac = normalizeMacInputGl_(extractMacFromDeviceName(device ? (device.name || '') : ''));
+            legDevice = await pickBleDevice_({ excludeMac: handMac, secondaryOnly: true });
             legDevice.addEventListener('gattserverdisconnected', function () {
                 var s = document.getElementById('nmptLegStatus');
                 if (s) {
