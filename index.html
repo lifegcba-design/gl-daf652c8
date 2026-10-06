@@ -2151,7 +2151,7 @@
         } catch (e) { }
     }
 
-    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-pages-fw-ota';
+    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-pages-fw-ota2';
     /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
     var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
     console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
@@ -2733,7 +2733,10 @@
             manUrl.searchParams.set('t', String(Date.now()));
             var resp = await fetch(manUrl.href, { cache: 'no-store' });
             if (!resp.ok) return null;
-            var j = await resp.json();
+            // strip UTF-8 BOM — Set-Content/Windows יכול להוסיף BOM ששובר JSON.parse בטלפון
+            var raw = await resp.text();
+            if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+            var j = JSON.parse(raw);
             if (!j || !j.version) return null;
             var binRel = String(j.url || ('GoldenLife_v' + j.version + '.bin'));
             var binUrl = /^https?:\/\//i.test(binRel)
