@@ -1281,6 +1281,9 @@
                 <input id="repeatCount" type="number" min="1" max="255" value="1"
                     onchange="updateBLEValue('repeatCount')" />
                 <small class="advanced-note">ניתן לבחור מ־1 ומעלה (עד 255)</small>
+                <small id="seriesFromPrimaryNote" class="advanced-note" style="display:none;color:#0f766e;">
+                    משני בזוגי — מוצג מה שמוגדר בראשי (תצוגה בלבד; הסדרה נשלטת מהראשי).
+                </small>
 
                 <hr class="advanced-divider">
                 <div class="ota-section">
@@ -1357,6 +1360,9 @@
     let charLegParams = null;
     let charDeviceConfig = null;  // 1.0.73: קריאת role+configMode מהצמיד (להצגת מקטע רגל רק ליד בזוגי)
     let _connectedNvsRole_ = NaN; // 0=יחיד 1=ראשי 2=משני — מ-NVS Device Config
+    let _connectedCfgMode_ = NaN; // 0=SINGLE 1=DUAL
+    let _connectedPairMac_ = '';  // MAC בן הזוג מ-Device Config (במשני = הראשי)
+    let _seriesMirrorFromPrimary_ = false; // תצוגת סדרה מהראשי כשמחוברים למשני
 
     // --- Log Service UUIDs (match ESP32 LOG_SERVICE_UUID etc.) ---
     const logServiceUuid = "8c9f0001-1b2b-4f5a-9e1a-1234567890ab";
@@ -1840,6 +1846,8 @@
 
     async function refreshConnectedRoleFromDevice_() {
         _connectedNvsRole_ = NaN;
+        _connectedCfgMode_ = NaN;
+        _connectedPairMac_ = '';
         try {
             if (charDeviceConfig && device && device.gatt && device.gatt.connected) {
                 var _cfg = null;
@@ -1847,6 +1855,15 @@
                 if (_cfg) {
                     var _cv = new DataView(_cfg.buffer);
                     if (_cv.byteLength >= 1) _connectedNvsRole_ = _cv.getUint8(0);
+                    if (_cv.byteLength >= 4) _connectedCfgMode_ = _cv.getUint8(3);
+                    if (_cv.byteLength >= 10) {
+                        var hex = '';
+                        for (var i = 4; i < 10; i++) {
+                            hex += ('0' + _cv.getUint8(i).toString(16)).slice(-2);
+                        }
+                        _connectedPairMac_ = hex.toUpperCase();
+                        if (/^0+$/.test(_connectedPairMac_)) _connectedPairMac_ = '';
+                    }
                 }
             }
         } catch (e) {
@@ -1860,6 +1877,132 @@
             else if (lbl === 'יחיד') _connectedNvsRole_ = 0;
         }
         refreshConnectedStatusMessage_();
+        await syncSeriesDisplayForRole_();
+    }
+
+    function seriesMirrorStorageKey_(primaryMac) {
+        return 'gl_series_primary_' + String(primaryMac || '').toUpperCase();
+    }
+
+    function saveSeriesMirrorFromUi_(primaryMac) {
+        var mac = normalizeMacInputGl_(primaryMac);
+        if (!mac || mac.length < 12) return;
+        var pd = parseInt(document.getElementById('postDelay').value, 10);
+        var rc = parseInt(document.getElementById('repeatCount').value, 10);
+        if (!isFinite(pd) || pd < 5) pd = 5;
+        if (!isFinite(rc) || rc < 1) rc = 1;
+        try {
+            localStorage.setItem(seriesMirrorStorageKey_(mac), JSON.stringify({
+                postDelay: pd,
+                repeatCount: rc,
+                primaryMac: mac,
+                updatedAt: Date.now()
+            }));
+        } catch (eLs) { }
+    }
+
+    function readSeriesMirrorLocal_(primaryMac) {
+        try {
+            var raw = localStorage.getItem(seriesMirrorStorageKey_(primaryMac));
+            if (!raw) return null;
+            var j = JSON.parse(raw);
+            if (!j) return null;
+            return {
+                postDelay: parseInt(j.postDelay, 10),
+                repeatCount: parseInt(j.repeatCount, 10)
+            };
+        } catch (e) { return null; }
+    }
+
+    function setSeriesFieldsReadonly_(ro) {
+        var pd = document.getElementById('postDelay');
+        var rc = document.getElementById('repeatCount');
+        if (pd) {
+            pd.readOnly = !!ro;
+            pd.style.opacity = ro ? '0.85' : '';
+            pd.style.background = ro ? '#f0fdfa' : '';
+        }
+        if (rc) {
+            rc.readOnly = !!ro;
+            rc.style.opacity = ro ? '0.85' : '';
+            rc.style.background = ro ? '#f0fdfa' : '';
+        }
+        var note = document.getElementById('seriesFromPrimaryNote');
+        if (note) note.style.display = ro ? 'block' : 'none';
+    }
+
+    function applySeriesMirrorValues_(postDelay, repeatCount) {
+        var pd = document.getElementById('postDelay');
+        var rc = document.getElementById('repeatCount');
+        var d = parseInt(postDelay, 10);
+        var r = parseInt(repeatCount, 10);
+        if (pd && isFinite(d) && d >= 5) pd.value = String(d);
+        if (rc && isFinite(r) && r >= 1) rc.value = String(r);
+    }
+
+    function clearSeriesMirrorUi_() {
+        _seriesMirrorFromPrimary_ = false;
+        setSeriesFieldsReadonly_(false);
+    }
+
+    /** משני+DUAL: מציג השהייה/חזרות של הראשי (localStorage ואז שרת). ראשי: שומר ל-localStorage. */
+    async function syncSeriesDisplayForRole_() {
+        var role = parseInt(_connectedNvsRole_, 10);
+        var cfg = parseInt(_connectedCfgMode_, 10);
+        var selfMac = normalizeMacInputGl_(extractMacFromDeviceName(device ? (device.name || '') : ''));
+        var pairMac = normalizeMacInputGl_(_connectedPairMac_);
+
+        if (role === 1) {
+            clearSeriesMirrorUi_();
+            if (selfMac) saveSeriesMirrorFromUi_(selfMac);
+            return;
+        }
+
+        var isSecondaryDual = (role === 2 && (cfg === 1 || !!pairMac));
+        if (!isSecondaryDual) {
+            clearSeriesMirrorUi_();
+            return;
+        }
+
+        _seriesMirrorFromPrimary_ = true;
+        setSeriesFieldsReadonly_(true);
+        var primaryMac = pairMac || '';
+
+        var local = primaryMac ? readSeriesMirrorLocal_(primaryMac) : null;
+        if (local && isFinite(local.postDelay) && isFinite(local.repeatCount)) {
+            applySeriesMirrorValues_(local.postDelay, local.repeatCount);
+        }
+
+        if (!LOG_WEBAPP_URL || !selfMac) return;
+        try {
+            var data = await fetchServerGetJson_(
+                'action=getPrimarySeriesParams&mac=' + encodeURIComponent(selfMac),
+                { timeoutMs: 12000 }
+            );
+            if (!data || !data.ok) return;
+            if (data.primaryMac) primaryMac = normalizeMacInputGl_(data.primaryMac);
+            var pm = parseInt(data.pauseMinutes, 10);
+            var rp = parseInt(data.repeats, 10);
+            if (isFinite(pm) && pm >= 5 && isFinite(rp) && rp >= 1) {
+                applySeriesMirrorValues_(pm, rp);
+                if (primaryMac) {
+                    try {
+                        localStorage.setItem(seriesMirrorStorageKey_(primaryMac), JSON.stringify({
+                            postDelay: pm,
+                            repeatCount: rp,
+                            primaryMac: primaryMac,
+                            updatedAt: Date.now(),
+                            source: 'server'
+                        }));
+                    } catch (e2) { }
+                }
+            } else if (primaryMac) {
+                var loc2 = readSeriesMirrorLocal_(primaryMac);
+                if (loc2) applySeriesMirrorValues_(loc2.postDelay, loc2.repeatCount);
+            }
+        } catch (eSrv) {
+            console.warn('getPrimarySeriesParams failed:', eSrv);
+        }
     }
 
     function bleRoleLabelFromName_(name) {
@@ -2666,6 +2809,9 @@
         // Hide control panel, show connect button
         document.getElementById('controlPanel').style.display = 'none';
         _connectedNvsRole_ = NaN;
+        _connectedCfgMode_ = NaN;
+        _connectedPairMac_ = '';
+        clearSeriesMirrorUi_();
         var _cdLine = document.getElementById('connectedDeviceLine');
         if (_cdLine) _cdLine.style.display = 'none';
         var _rb = document.getElementById('connectedDeviceRoleBadge');
@@ -3163,6 +3309,10 @@
                         }
                         break;
                     case 'postDelay':
+                        if (_seriesMirrorFromPrimary_) {
+                            console.log('series mirror: skip writing postDelay to secondary');
+                            break;
+                        }
                         value = parseInt(document.getElementById('postDelay').value, 10);
                         let currentRepeatCountForDelay = parseInt(document.getElementById('repeatCount').value, 10);
                         if (charStart) {
@@ -3177,8 +3327,15 @@
                             console.log(`?? Sent Post Delay update: ${value} minutes, repeat: ${currentRepeatCountForDelay}`);
                             await new Promise(resolve => setTimeout(resolve, 100));
                         }
+                        if (parseInt(_connectedNvsRole_, 10) === 1) {
+                            saveSeriesMirrorFromUi_(extractMacFromDeviceName(device ? (device.name || '') : ''));
+                        }
                         break;
                     case 'repeatCount':
+                        if (_seriesMirrorFromPrimary_) {
+                            console.log('series mirror: skip writing repeatCount to secondary');
+                            break;
+                        }
                         value = parseInt(document.getElementById('repeatCount').value, 10);
                         let currentPostDelayForRepeat = parseInt(document.getElementById('postDelay').value, 10);
                         if (charStart) {
@@ -3192,6 +3349,9 @@
                             await charStart.writeValue(buffer);
                             console.log(`?? Sent Repeat Count update: ${value}, postDelay: ${currentPostDelayForRepeat}`);
                             await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                        if (parseInt(_connectedNvsRole_, 10) === 1) {
+                            saveSeriesMirrorFromUi_(extractMacFromDeviceName(device ? (device.name || '') : ''));
                         }
                         break;
                 }
@@ -3342,6 +3502,7 @@
             }
 
             console.log("? Loaded scenario parameters:", { command, delay, repeat, voltageV, remainingScenarios });
+            await syncSeriesDisplayForRole_();
 
         } catch (error) {
             console.error("? Failed to load scenario parameters:", error);
