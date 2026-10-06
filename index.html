@@ -1267,7 +1267,7 @@
         <div class="ble-picker-dialog">
             <div class="ble-picker-dialog__head">
                 <h2 id="blePickerTitle">בחירת צמיד Golden Life</h2>
-                <p>בחרו את הצמיד לפי כתובת MAC (מוצגת עם נקודותיים). הצמיד הקרוב ביותר מופיע ראשון.</p>
+                <p>בחרו לפי <strong>MAC</strong>. שם התפקיד (ראשי/משני/יחיד) מתעדכן רק אחרי <strong>ניתוק</strong> מהצמיד — לא בזמן חיבור.</p>
             </div>
             <div id="blePickerStatus">סורק מכשירים…</div>
             <div id="blePickerList"></div>
@@ -1959,20 +1959,25 @@
             }).then(function (controller) {
                 _bleScanController = controller;
                 controller.addEventListener('advertisementreceived', function (event) {
-                    var advName = event.name || (event.device && event.device.name) || '';
-                    if (!isGoldenLifeBleName_(advName) && !isGoldenLifeBleName_(event.device.name || '')) return;
-                    var name = advName || event.device.name || '';
+                    // שם חי מהפרסום — לא device.name (Chrome שומר cache ישן אחרי שינוי תפקיד)
+                    var liveName = String(event.name || '').trim();
+                    var cachedName = String((event.device && event.device.name) || '').trim();
+                    if (!isGoldenLifeBleName_(liveName) && !isGoldenLifeBleName_(cachedName)) return;
+                    var name = liveName || cachedName;
                     var macRaw = extractMacFromDeviceName(name);
                     var macPlain = normalizeMacInputGl_(macRaw);
                     var devId = String((event.device && event.device.id) || '');
                     if (excludeDeviceId && devId === excludeDeviceId) return;
                     if (excludeMac && macPlain === excludeMac) return;
+                    var prev = found.get(event.device.id);
+                    var roleSrc = liveName || (prev && prev.liveName) || name;
                     found.set(event.device.id, {
                         id: event.device.id,
                         device: event.device,
-                        macPlain: macPlain,
-                        macDisplay: formatMacDisplay_(macRaw) || macPlain || name,
-                        roleLabel: bleRoleLabelFromName_(name),
+                        macPlain: macPlain || (prev && prev.macPlain) || '',
+                        macDisplay: formatMacDisplay_(macRaw) || (prev && prev.macDisplay) || macPlain || name,
+                        roleLabel: bleRoleLabelFromName_(roleSrc),
+                        liveName: liveName || (prev && prev.liveName) || '',
                         rssi: event.rssi
                     });
                     clearTimeout(emptyFallbackTimer);
@@ -2060,7 +2065,7 @@
         } catch (e) { }
     }
 
-    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ota-confirm';
+    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ble-name-scan';
     /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
     var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
     console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
