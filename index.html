@@ -1086,6 +1086,38 @@
             color: #111827;
             box-shadow: none;
         }
+
+        .connected-device-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0 4px;
+            font-size: 15px;
+        }
+
+        .connected-mac-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: #e0f2fe;
+            color: #0c4a6e;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.03em;
+            vertical-align: middle;
+        }
+
+        .connected-role-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: #ecfdf5;
+            color: #047857;
+            font-weight: 700;
+            font-size: 13px;
+            vertical-align: middle;
+        }
     </style>
     <script type="application/json"
         id="server-web-app-base">"https://script.google.com/macros/s/AKfycbxx6TBP0UoK34rli1a5jzxhIvZeaho6bq3W5HCXNScLbmOPjLrtbqRaknUVS3JZGZt1/exec"</script>
@@ -1119,6 +1151,11 @@
             <i class="fas fa-times-circle"></i> ניתוק
         </button>
         <div id="statusMessage"></div>
+        <div id="connectedDeviceLine" class="connected-device-line" style="display:none" aria-live="polite">
+            <span>מחובר ·</span>
+            <span id="connectedDeviceRoleBadge" class="connected-role-badge" title="תפקיד מ-NVS הצמיד">—</span>
+            <span id="connectedDeviceMacBadge" class="connected-mac-badge" dir="ltr" title="כתובת MAC של הצמיד המחובר">—</span>
+        </div>
         <div id="customerGreeting"></div>
         <div id="controlPanel">
             <h3>
@@ -1319,6 +1356,7 @@
     const charUuidLegParams = "b1c2d3e4-0072-4a2b-8c3d-4e5f60718293";  // 1.0.72: פרמטרי רגל דרך היד
     let charLegParams = null;
     let charDeviceConfig = null;  // 1.0.73: קריאת role+configMode מהצמיד (להצגת מקטע רגל רק ליד בזוגי)
+    let _connectedNvsRole_ = NaN; // 0=יחיד 1=ראשי 2=משני — מ-NVS Device Config
 
     // --- Log Service UUIDs (match ESP32 LOG_SERVICE_UUID etc.) ---
     const logServiceUuid = "8c9f0001-1b2b-4f5a-9e1a-1234567890ab";
@@ -1776,6 +1814,63 @@
         return hex.length >= 12 ? hex.slice(-12) : "";
     }
 
+    function roleLabelFromNvs_(roleNum) {
+        var r = parseInt(roleNum, 10);
+        if (r === 1) return 'ראשי';
+        if (r === 2) return 'משני';
+        if (r === 0) return 'יחיד';
+        return 'צמיד';
+    }
+
+    function refreshConnectedStatusMessage_() {
+        var roleHeb = roleLabelFromNvs_(_connectedNvsRole_);
+        // עדיפות: MAC משם BLE; גיבוי מתווית תפקיד אם השם ריק
+        var mac = normalizeMacInputGl_(extractMacFromDeviceName(device ? (device.name || '') : ''));
+        var macDisp = (mac && mac.length === 12) ? mac : '—';
+        var line = document.getElementById('connectedDeviceLine');
+        var macBadge = document.getElementById('connectedDeviceMacBadge');
+        var roleBadge = document.getElementById('connectedDeviceRoleBadge');
+        if (macBadge) macBadge.textContent = macDisp;
+        if (roleBadge) roleBadge.textContent = roleHeb;
+        if (line) {
+            var connected = !!(device && device.gatt && device.gatt.connected);
+            line.style.display = connected ? 'flex' : 'none';
+        }
+        if (_otaInProgress || _otaAwaitingReboot) return;
+        var sm = document.getElementById('statusMessage');
+        if (!sm) return;
+        var cur = String(sm.textContent || '');
+        if (/עדכון קושחה|מעדכן קושחה|OTA|סוללה נמוכה|מעודכנת \(שרת|בוטל/i.test(cur)) return;
+        if (device && device.gatt && device.gatt.connected) {
+            sm.textContent = 'מחובר · ' + roleHeb + ' · ' + macDisp;
+            sm.style.color = '';
+        }
+    }
+
+    async function refreshConnectedRoleFromDevice_() {
+        _connectedNvsRole_ = NaN;
+        try {
+            if (charDeviceConfig && device && device.gatt && device.gatt.connected) {
+                var _cfg = null;
+                await runGattOp(async function () { _cfg = await charDeviceConfig.readValue(); });
+                if (_cfg) {
+                    var _cv = new DataView(_cfg.buffer);
+                    if (_cv.byteLength >= 1) _connectedNvsRole_ = _cv.getUint8(0);
+                }
+            }
+        } catch (e) {
+            console.warn('NVS role read failed, fallback to BLE name:', e);
+        }
+        // גיבוי משם הפרסום אם NVS לא נקרא
+        if (isNaN(_connectedNvsRole_)) {
+            var lbl = bleRoleLabelFromName_((device && device.name) || '');
+            if (lbl === 'ראשי') _connectedNvsRole_ = 1;
+            else if (lbl === 'משני') _connectedNvsRole_ = 2;
+            else if (lbl === 'יחיד') _connectedNvsRole_ = 0;
+        }
+        refreshConnectedStatusMessage_();
+    }
+
     function bleRoleLabelFromName_(name) {
         var n = String(name || '');
         if (n.indexOf('ראשי') === 0) return 'ראשי';
@@ -2065,7 +2160,7 @@
         } catch (e) { }
     }
 
-    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ble-name-scan';
+    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-connected-role-mac';
     /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
     var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
     console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
@@ -2579,6 +2674,13 @@
 
         // Hide control panel, show connect button
         document.getElementById('controlPanel').style.display = 'none';
+        _connectedNvsRole_ = NaN;
+        var _cdLine = document.getElementById('connectedDeviceLine');
+        if (_cdLine) _cdLine.style.display = 'none';
+        var _rb = document.getElementById('connectedDeviceRoleBadge');
+        if (_rb) _rb.textContent = '—';
+        var _mb = document.getElementById('connectedDeviceMacBadge');
+        if (_mb) _mb.textContent = '—';
 
         document.getElementById('connectButton').style.display = 'block'; // הצג את כפתור ההתחברות מחדש
         var connOtaBtn = document.getElementById('connectOtaButton');
@@ -2871,10 +2973,10 @@
                 if (_advSec) _advSec.style.display = 'block';
             } else {
                 document.getElementById('controlPanel').style.display = 'block';
-                document.getElementById('statusMessage').textContent = 'מחובר לצמיד · Golden life - ' + (formatMacPlain_(extractMacFromDeviceName((device && device.name) || '')) || '—');
                 // NMPT: טעינת מצב יחיד/זוגי מהשרת לפי ה-MAC המחובר
                 loadUserDeviceMode(extractMacFromDeviceName(device.name || ''));
             }
+            await refreshConnectedRoleFromDevice_();
             setFirmwareVersionBanner(true, '\u05de\u05d6\u05d4\u05d4 \u05d2\u05e8\u05e1\u05d4...', '');
             // הצג שלום ללקוח הרשום
             (async function showCustomerGreeting() {
@@ -2908,6 +3010,7 @@
 
             var _otaConnect = await checkAndOfferAutoOtaOnConnect_();
             if (_otaConnect.didOta) return;
+            refreshConnectedStatusMessage_();
 
             await syncLogsFromDeviceIfNeeded_();
 
@@ -3381,7 +3484,7 @@
             if (charDeviceConfig) {
                 var _cfg = null;
                 await runGattOp(async function () { _cfg = await charDeviceConfig.readValue(); });
-                if (_cfg) { var _cv = new DataView(_cfg.buffer); if (_cv.byteLength >= 4) { _configKnown = true; _isHandDual = (_cv.getUint8(0) === 1 && _cv.getUint8(3) === 1); } }
+                if (_cfg) { var _cv = new DataView(_cfg.buffer); if (_cv.byteLength >= 4) { _configKnown = true; _isHandDual = (_cv.getUint8(0) === 1 && _cv.getUint8(3) === 1); } if (_cv.byteLength >= 1) { _connectedNvsRole_ = _cv.getUint8(0); refreshConnectedStatusMessage_(); } }
             }
         } catch (e) { console.warn('deviceConfig read failed', e); }
         if (_configKnown && !_isHandDual) { sec.style.display = 'none'; return; }  // יד יחידה / רגל / standalone → מוסתר
