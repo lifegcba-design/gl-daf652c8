@@ -2060,7 +2060,7 @@
         } catch (e) { }
     }
 
-    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ota-update-msg';
+    var GL_LOCAL_BUILD_TAG = 'v2026-10-06-ota-confirm';
     /** מרווח מינימלי בין סנכron לוגים לענן (48 שעות) */
     var LOG_CLOUD_SYNC_MIN_MS = 48 * 60 * 60 * 1000;
     console.log('Goldenlife build:', GL_LOCAL_BUILD_TAG);
@@ -2701,11 +2701,18 @@
             }
             var _updMsg = (_isInventoryMode || _fwData.updateOnlyMode)
                 ? (_roleHebFw + ': צמיד לא רשום — נמצא עדכון ' +
-                   _currentFirmwareVersion + ' → ' + _otaTargetVer + '. מבצע OTA אוטומטי…')
+                   _currentFirmwareVersion + ' → ' + _otaTargetVer)
                 : (_roleHebFw + ': נמצא עדכון קושחה ' +
-                   _currentFirmwareVersion + ' → ' + _otaTargetVer + '. מתחיל OTA אוטומטי…');
+                   _currentFirmwareVersion + ' → ' + _otaTargetVer);
             document.getElementById('statusMessage').textContent = _updMsg;
-            try { alert(_updMsg); } catch (eUpd) { }
+            var _ask = _updMsg + '.\n\nלאשר עדכון עכשיו?\n\nאישור = עדכון  |  ביטול = לדלג';
+            var _ok = false;
+            try { _ok = confirm(_ask); } catch (eUpd) { _ok = false; }
+            if (!_ok) {
+                document.getElementById('statusMessage').textContent =
+                    _roleHebFw + ': עדכון ל-' + _otaTargetVer + ' בוטל. ניתן להתחבר מחדש כדי לעדכן.';
+                return result;
+            }
             document.getElementById('statusMessage').textContent =
                 'מעדכן קושחה ל-' + _otaTargetVer + ' — אין הפעלת תרחישים עד סיום וחיבור מחדש.';
             await runAutomaticOTA(_fwData.downloadUrl, _otaTargetVer, _macForFwCheck);
