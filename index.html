@@ -2864,20 +2864,16 @@
         }
         var _batteryKnownLow = (lastBatteryPercent != null && lastBatteryPercent < 40) ||
             (lastBatteryVoltage != null && lastBatteryVoltage > 0 && lastBatteryVoltage < 3.75);
-        if (_batteryKnownLow) {
-            var _lowBattMsg = _roleHebFw + ': נמצא עדכון קושחה ' +
-                _currentFirmwareVersion + ' → ' + _latest +
-                ', אך הסוללה נמוכה. טען את הצמיד — אחרי טעינה התחברו שוב.';
-            document.getElementById('statusMessage').textContent = _lowBattMsg;
-            try { alert(_lowBattMsg); } catch (eLow) { }
-            return result;
-        }
         var _updMsg = _roleHebFw + ': נמצא עדכון קושחה ' +
             _currentFirmwareVersion + ' → ' + _latest;
-        document.getElementById('statusMessage').textContent = _updMsg;
+        if (_batteryKnownLow) {
+            _updMsg += '.\n\nהסוללה נמוכה — חברו את הצמיד לחשמל/טעינה ואז אשרו.\n' +
+                'גם עם סוללה נמוכה אפשר לעדכן אם מחוברים לחשמל.';
+        }
+        document.getElementById('statusMessage').textContent = _updMsg.replace(/\n/g, ' ');
         var _ok = false;
         try {
-            _ok = window.confirm(_updMsg + '.\n\nלאשר עדכון עכשיו?\n\nאישור = עדכון  |  ביטול = לדלג');
+            _ok = window.confirm(_updMsg + '\n\nלאשר עדכון עכשיו?\n\nאישור = עדכון  |  ביטול = לדלג');
         } catch (eUpd) { _ok = false; }
         if (!_ok) {
             document.getElementById('statusMessage').textContent =
