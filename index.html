@@ -1824,7 +1824,6 @@
 
     function refreshConnectedStatusMessage_() {
         var roleHeb = roleLabelFromNvs_(_connectedNvsRole_);
-        // עדיפות: MAC משם BLE; גיבוי מתווית תפקיד אם השם ריק
         var mac = normalizeMacInputGl_(extractMacFromDeviceName(device ? (device.name || '') : ''));
         var macDisp = (mac && mac.length === 12) ? mac : '—';
         var line = document.getElementById('connectedDeviceLine');
@@ -1836,15 +1835,7 @@
             var connected = !!(device && device.gatt && device.gatt.connected);
             line.style.display = connected ? 'flex' : 'none';
         }
-        if (_otaInProgress || _otaAwaitingReboot) return;
-        var sm = document.getElementById('statusMessage');
-        if (!sm) return;
-        var cur = String(sm.textContent || '');
-        if (/עדכון קושחה|מעדכן קושחה|OTA|סוללה נמוכה|מעודכנת \(שרת|בוטל/i.test(cur)) return;
-        if (device && device.gatt && device.gatt.connected) {
-            sm.textContent = 'מחובר · ' + roleHeb + ' · ' + macDisp;
-            sm.style.color = '';
-        }
+        // לא לכתוב שוב ל-statusMessage — רק שורת התגיות (מונע כפילות)
     }
 
     async function refreshConnectedRoleFromDevice_() {
@@ -2745,17 +2736,28 @@
             console.log('Bracelet firmware version:', _currentFirmwareVersion);
         } catch (readErr) {
             console.warn('Firmware version read failed:', readErr);
+            setFirmwareVersionBanner(true, '—', '');
             return result;
         }
+        // מיד אחרי קריאה — לא להישאר על «מזהה גרסה...»
+        setFirmwareVersionBanner(true, _currentFirmwareVersion || '\u2014', _currentFirmwareVersion || '');
         if (!LOG_WEBAPP_URL || !_currentFirmwareVersion || _currentFirmwareVersion.toLowerCase() === 'unknown') {
-            setFirmwareVersionBanner(true, _currentFirmwareVersion || '\u2014', _currentFirmwareVersion || '');
             return result;
         }
-        var _macForFwCheck = extractMacFromDeviceName(device.name || '');
-        if (!_macForFwCheck) return result;
+        var _macForFwCheck = extractMacFromDeviceName(device.name || '') ||
+            normalizeMacInputGl_(document.getElementById('connectedDeviceMacBadge') &&
+                document.getElementById('connectedDeviceMacBadge').textContent);
+        if (!_macForFwCheck || _macForFwCheck.length < 12) {
+            console.warn('No MAC for firmware check — skip auto OTA offer');
+            return result;
+        }
         try {
-            const _fwResp = await fetchServerGetJson_('action=checkFirmware&refreshDrive=1&version=' +
-                encodeURIComponent(_currentFirmwareVersion) + '&mac=' + encodeURIComponent(_macForFwCheck));
+            // בלי refreshDrive בחיבור — מהיר בטלפון; גרסת שרת כבר מתעדכנת בהעלאת BIN
+            const _fwResp = await fetchServerGetJson_(
+                'action=checkFirmware&version=' + encodeURIComponent(_currentFirmwareVersion) +
+                '&mac=' + encodeURIComponent(_macForFwCheck),
+                { timeoutMs: 12000 }
+            );
             const _fwData = _fwResp;
             result.fwData = _fwData;
             if (_fwData && _fwData.updateOnlyMode) _isInventoryMode = true;
@@ -2763,7 +2765,6 @@
             var _effectiveBanner = _bleBanner;
             if (_fwData && _fwData.ok) {
                 var _sheetVer = String(_fwData.lastSuccessfulNewVersion || '').trim();
-                // רק אם הגיליון גבוה מ-BLE (BLE = מקור אמת; מונע הצגת גרסה ישנה בצריבה ידנית)
                 if (_sheetVer && versionCompareSemver(_sheetVer, _bleBanner) > 0) _effectiveBanner = _sheetVer;
             }
             setFirmwareVersionBanner(true, _effectiveBanner || '\u2014', _bleBanner);
@@ -2772,19 +2773,19 @@
                     '&version=' + encodeURIComponent(_currentFirmwareVersion));
                 completePendingOtaVerification(_macForFwCheck, _currentFirmwareVersion);
             }
-            var _roleHebFw = bleRoleLabelFromName_((device && device.name) || '') || 'צמיד';
+            var _roleHebFw = roleLabelFromNvs_(_connectedNvsRole_) ||
+                bleRoleLabelFromName_((device && device.name) || '') || 'צמיד';
             var _offerOta = _fwData && _fwData.ok && _fwData.downloadUrl && _macForFwCheck &&
                 (_fwData.otaAllowed === true || _fwData.needsOta === true);
             if (!_offerOta) {
                 if (_fwData && _fwData.ok && versionCompareSemver(_currentFirmwareVersion, _fwData.latestVersion || '') >= 0) {
                     markOtaAutoComplete_(_macForFwCheck, String(_fwData.latestVersion || ''));
                     document.getElementById('statusMessage').textContent =
-                        _roleHebFw + ' · גרסה ' + _currentFirmwareVersion +
-                        ' מעודכנת (שרת: ' + String(_fwData.latestVersion || '—') +
-                        '). ניתן להפעיל תרחישים (התחל).';
+                        'גרסה ' + _currentFirmwareVersion +
+                        ' מעודכנת (שרת: ' + String(_fwData.latestVersion || '—') + ').';
                 } else if (_fwData && _fwData.ok && _fwData.latestVersion) {
                     document.getElementById('statusMessage').textContent =
-                        _roleHebFw + ' · גרסה ' + _currentFirmwareVersion +
+                        'גרסה ' + _currentFirmwareVersion +
                         ' · שרת: ' + String(_fwData.latestVersion || '—');
                 }
                 return result;
@@ -2792,8 +2793,8 @@
             var _otaTargetVer = String(_fwData.latestVersion || '');
             if (!shouldOfferAutoOta_(_macForFwCheck, _otaTargetVer)) {
                 document.getElementById('statusMessage').textContent =
-                    _roleHebFw + ': עדכון ל-' + _otaTargetVer +
-                    ' כבר הושלם / נחסם בסשן זה. רענון F5 אם צריך לנסות שוב.';
+                    'עדכון ל-' + _otaTargetVer +
+                    ' כבר הושלם / נחסם בסשן זה. רענון הדף אם צריך לנסות שוב.';
                 return result;
             }
             var _batteryKnownLow = (lastBatteryPercent != null && lastBatteryPercent < 40) ||
@@ -2814,10 +2815,10 @@
             document.getElementById('statusMessage').textContent = _updMsg;
             var _ask = _updMsg + '.\n\nלאשר עדכון עכשיו?\n\nאישור = עדכון  |  ביטול = לדלג';
             var _ok = false;
-            try { _ok = confirm(_ask); } catch (eUpd) { _ok = false; }
+            try { _ok = window.confirm(_ask); } catch (eUpd) { _ok = false; }
             if (!_ok) {
                 document.getElementById('statusMessage').textContent =
-                    _roleHebFw + ': עדכון ל-' + _otaTargetVer + ' בוטל. ניתן להתחבר מחדש כדי לעדכן.';
+                    'עדכון ל-' + _otaTargetVer + ' בוטל. ניתן להתחבר מחדש כדי לעדכן.';
                 return result;
             }
             document.getElementById('statusMessage').textContent =
@@ -2826,6 +2827,9 @@
             result.didOta = true;
         } catch (fwErr) {
             console.warn('Auto OTA check failed:', fwErr);
+            setFirmwareVersionBanner(true, _currentFirmwareVersion || '\u2014', _currentFirmwareVersion || '');
+            var smFail = document.getElementById('statusMessage');
+            if (smFail) smFail.textContent = 'בדיקת עדכון קושחה נכשלה / איטית — נסו שוב או רעננו.';
         }
         return result;
     }
@@ -2978,12 +2982,12 @@
             }
             await refreshConnectedRoleFromDevice_();
             setFirmwareVersionBanner(true, '\u05de\u05d6\u05d4\u05d4 \u05d2\u05e8\u05e1\u05d4...', '');
-            // הצג שלום ללקוח הרשום
+            // הצג שלום ללקוח הרשום (ברקע — לא חוסם OTA)
             (async function showCustomerGreeting() {
                 try {
                     var _greetMac = extractMacFromDeviceName(device.name || '');
                     if (!_greetMac || !LOG_WEBAPP_URL) return;
-                    var _gData = await fetchServerGetJson_('action=checkMac&mac=' + encodeURIComponent(_greetMac));
+                    var _gData = await fetchServerGetJson_('action=checkMac&mac=' + encodeURIComponent(_greetMac), { timeoutMs: 10000 });
                     var _gEl = document.getElementById('customerGreeting');
                     if (!_gEl) return;
                     if (_gData && _gData.ok && _gData.registered && _gData.userName) {
@@ -3005,12 +3009,13 @@
                 document.getElementById('startOtaButton').disabled = false;
             }
 
-            await checkMacAndShowRegistration();
-            flushPendingFirmwareLogs().catch(function () { });
-
+            // קודם בדיקת גרסה + חלון אישור OTA — לפני רישום/לוגים (מהיר יותר בטלפון)
             var _otaConnect = await checkAndOfferAutoOtaOnConnect_();
             if (_otaConnect.didOta) return;
             refreshConnectedStatusMessage_();
+
+            await checkMacAndShowRegistration();
+            flushPendingFirmwareLogs().catch(function () { });
 
             await syncLogsFromDeviceIfNeeded_();
 
