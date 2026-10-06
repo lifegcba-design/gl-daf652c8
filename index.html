@@ -2647,7 +2647,7 @@
         var _macForFwCheck = extractMacFromDeviceName(device.name || '');
         if (!_macForFwCheck) return result;
         try {
-            const _fwResp = await fetchServerGetJson_('action=checkFirmware&version=' +
+            const _fwResp = await fetchServerGetJson_('action=checkFirmware&refreshDrive=1&version=' +
                 encodeURIComponent(_currentFirmwareVersion) + '&mac=' + encodeURIComponent(_macForFwCheck));
             const _fwData = _fwResp;
             result.fwData = _fwData;
