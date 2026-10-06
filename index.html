@@ -1236,13 +1236,14 @@
 
             <div id="advancedOptions">
                 <label for="postDelay">זמן השהייה בין תרחישים (בדקות)</label>
-                <input id="postDelay" type="number" min="10" max="65535" value="10"
+                <input id="postDelay" type="number" min="5" max="65535" value="10"
                     onchange="updateBLEValue('postDelay')" />
 
-                <small class="advanced-note">מינימום 10 דקות</small>
+                <small class="advanced-note">מינימום 5 דקות</small>
                 <label for="repeatCount">מספר חזרות:</label>
                 <input id="repeatCount" type="number" min="1" max="255" value="1"
                     onchange="updateBLEValue('repeatCount')" />
+                <small class="advanced-note">ניתן לבחור מ־1 ומעלה (עד 255)</small>
 
                 <hr class="advanced-divider">
                 <div class="ota-section">
@@ -3119,7 +3120,7 @@
 
             const postDelayElem = document.getElementById('postDelay');
             if (postDelayElem) {
-                postDelayElem.value = delay >= 10 ? delay : 10;
+                postDelayElem.value = delay >= 5 ? delay : 5;
             }
 
             const repeatCountElem = document.getElementById('repeatCount');
@@ -3212,9 +3213,9 @@
             }
 
             let postDelayMinutes = parseInt(document.getElementById('postDelay').value, 10);
-            if (isNaN(postDelayMinutes) || postDelayMinutes < 10) {
-                postDelayMinutes = 10;
-                document.getElementById('postDelay').value = '10';
+            if (isNaN(postDelayMinutes) || postDelayMinutes < 5) {
+                postDelayMinutes = 5;
+                document.getElementById('postDelay').value = '5';
             }
 
             let repeatCountValue = parseInt(document.getElementById('repeatCount').value, 10);
@@ -3555,7 +3556,7 @@
 
             // פרמטרים משותפים (גלובליים לשני הצמידים)
             let postDelayMinutes = parseInt(document.getElementById('postDelay').value, 10);
-            if (isNaN(postDelayMinutes) || postDelayMinutes < 10) { postDelayMinutes = 10; document.getElementById('postDelay').value = '10'; }
+            if (isNaN(postDelayMinutes) || postDelayMinutes < 5) { postDelayMinutes = 5; document.getElementById('postDelay').value = '5'; }
             let repeatCountValue = parseInt(document.getElementById('repeatCount').value, 10);
             if (isNaN(repeatCountValue) || repeatCountValue < 1) repeatCountValue = 1;
 
