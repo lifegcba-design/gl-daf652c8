@@ -850,6 +850,14 @@
             font-size: 12px;
         }
 
+        .series-from-primary-note {
+            color: #0f766e;
+        }
+
+        .series-from-primary-note.is-hidden {
+            display: none;
+        }
+
         .advanced-divider {
             margin-top: 6px;
             margin-bottom: 6px;
@@ -1096,6 +1104,10 @@
             font-size: 15px;
         }
 
+        .connected-device-line.is-hidden {
+            display: none;
+        }
+
         .connected-mac-badge {
             display: inline-block;
             padding: 2px 8px;
@@ -1151,7 +1163,7 @@
             <i class="fas fa-times-circle"></i> ניתוק
         </button>
         <div id="statusMessage"></div>
-        <div id="connectedDeviceLine" class="connected-device-line" style="display:none" aria-live="polite">
+        <div id="connectedDeviceLine" class="connected-device-line is-hidden" aria-live="polite">
             <span>מחובר ·</span>
             <span id="connectedDeviceRoleBadge" class="connected-role-badge" title="תפקיד מ-NVS הצמיד">—</span>
             <span id="connectedDeviceMacBadge" class="connected-mac-badge" dir="ltr" title="כתובת MAC של הצמיד המחובר">—</span>
@@ -1281,7 +1293,7 @@
                 <input id="repeatCount" type="number" min="1" max="255" value="1"
                     onchange="updateBLEValue('repeatCount')" />
                 <small class="advanced-note">ניתן לבחור מ־1 ומעלה (עד 255)</small>
-                <small id="seriesFromPrimaryNote" class="advanced-note" style="display:none;color:#0f766e;">
+                <small id="seriesFromPrimaryNote" class="advanced-note series-from-primary-note is-hidden">
                     משני בזוגי — מוצג מה שמוגדר בראשי (תצוגה בלבד; הסדרה נשלטת מהראשי).
                 </small>
 
@@ -1839,7 +1851,7 @@
         if (roleBadge) roleBadge.textContent = roleHeb;
         if (line) {
             var connected = !!(device && device.gatt && device.gatt.connected);
-            line.style.display = connected ? 'flex' : 'none';
+            line.classList.toggle('is-hidden', !connected);
         }
         // לא לכתוב שוב ל-statusMessage — רק שורת התגיות (מונע כפילות)
     }
@@ -1928,7 +1940,7 @@
             rc.style.background = ro ? '#f0fdfa' : '';
         }
         var note = document.getElementById('seriesFromPrimaryNote');
-        if (note) note.style.display = ro ? 'block' : 'none';
+        if (note) note.classList.toggle('is-hidden', !ro);
     }
 
     function applySeriesMirrorValues_(postDelay, repeatCount) {
@@ -2813,7 +2825,7 @@
         _connectedPairMac_ = '';
         clearSeriesMirrorUi_();
         var _cdLine = document.getElementById('connectedDeviceLine');
-        if (_cdLine) _cdLine.style.display = 'none';
+        if (_cdLine) _cdLine.classList.add('is-hidden');
         var _rb = document.getElementById('connectedDeviceRoleBadge');
         if (_rb) _rb.textContent = '—';
         var _mb = document.getElementById('connectedDeviceMacBadge');
@@ -3610,10 +3622,18 @@
                 beginWebSession_();
                 sessionWasActive = true;
                 sendSessionStartToServer();
-                // C6: אי אפשר BLE+ESP-NOW יחד — מנתקים אחרי START כדי שהיד תפעיל את הרגל דרך ESP-NOW
-                setScenarioStatus_('הופעל ✓ מפעיל את הרגל...', false);
-                _autoDisconnectForLeg_ = true;
-                setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 600);
+                // C6: אי אפשר BLE+ESP-NOW יחד — מנתקים אחרי START רק בזוגי (ראשי), כדי להפעיל משני
+                var _lpsStart = document.getElementById('legParamsSection');
+                var _dualStart = (_lpsStart && _lpsStart.style.display === 'block') ||
+                    (_connectedNvsRole_ === 1);
+                if (_dualStart) {
+                    setScenarioStatus_('הופעל ✓ מפעיל את הרגל...', false);
+                    _autoDisconnectForLeg_ = true;
+                    setTimeout(function () { try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) { } }, 600);
+                } else {
+                    setScenarioStatus_('הופעל ✓', false);
+                    document.getElementById('statusMessage').textContent = 'מחובר · יחיד — תרחיש פעיל';
+                }
             } else {
                 setScenarioStatus_('מאפיין Start/Stop לא זמין — נתקו והתחברו מחדש.', true);
             }
